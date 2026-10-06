@@ -4,15 +4,33 @@
 # Source of truth: android:versionName in AndroidManifest.xml, which always holds the NEXT TARGET
 # RELEASE (X.Y.Z, no suffix). Everything else is derived from it.
 #
-#   RELEASE=1  -> X.Y.Z          versionCode = formula(P=999)
-#   otherwise  -> X.Y.Z-dev.N    versionCode = formula(P=N)
-#                N = commits since the last v* tag, or the number of commits when no tag exists
+#   RELEASE=1  -> X.Y.Z                 versionCode = formula(P=999)
+#   otherwise  -> X.Y.Z-dev.gHASH[+dirty] versionCode = formula(P=<monotonic stamp>)
 #
-# Exports: VERSION_BASE VERSION_NAME VERSION_CODE DEV_COUNT
+# Why the versionCode is a stamp and not a commit count.
+#
+# The camera decides whether to replace an installed app by comparing versionCode, an int. Two builds
+# of the *same commit* produce the same commit count, so they produced the same versionCode, so the
+# camera had no reason to install the second one — the app on the body stayed the first build while
+# every later build reported success. That is indistinguishable, from the camera screen, from "the
+# fix did not work", and it cost two rounds of chasing a bug that may never have been installed.
+#
+# So the dev versionCode is a stamp that increases on every build:
+#   * the number of commits, so it grows as history does;
+#   * times a million;
+#   * plus the build number reserved for this build.
+# The last build's code is remembered in .build-number, so the value can only go up even if the clock
+# moves backwards or two builds land in the same second.
+#
+# The versionName carries the commit hash and says whether the tree was dirty, so a photograph of the
+# About line identifies the exact source a build came from.
+#
+# Exports: VERSION_BASE VERSION_NAME VERSION_CODE DEV_COUNT VERSION_HASH
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST="$ROOT/AndroidManifest.xml"
+STAMP_FILE="$ROOT/.build-number"
 
 # DEV_BASE_VERSION lets a dev build label itself with the version the release tooling would publish
 # next, instead of the one already released.
@@ -26,34 +44,7 @@ esac
 
 IFS=. read -r MAJOR MINOR PATCH <<<"$VERSION_BASE"
 
-# Count commits since the last v* tag. `git` may be absent (a source tarball, a fresh export) or
-# the tree may not be a repository yet; both are normal here, so the count falls back to 1 rather
-# than failing the build. A dev build is always at least .1 because 0 would mean "no build yet".
-dev_count() {
-  local tag
-  if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-    tag="$(git -C "$ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
-    if [ -n "$tag" ]; then
-      git -C "$ROOT" rev-list --count "$tag..HEAD" 2>/dev/null && return
-    else
-      git -C "$ROOT" rev-list --count HEAD 2>/dev/null && return
-    fi
-  fi
-  # No git repository yet, so there is no commit count to derive from — and a counter that never
-  # moves is worse than no counter at all: every build then carries the same versionCode, which is
-  # exactly the kind of "it did not change" the camera cannot distinguish from a failed install. So
-  # fall back to a stored, incrementing build number.
-  # Deliberately not under out/: that directory is build output and is wiped at the start of every
-  # build, so a counter living there restarts at 1 every time — which is the same "every build has the
-  # same versionCode" problem this fallback exists to fix.
-  local counter="$ROOT/.build-number"
-  local n=0
-  [ -f "$counter" ] && n="$(tr -dc '0-9' < "$counter" || echo 0)"
-  [ -n "$n" ] || n=0
-  n=$((n + 1))
-  printf '%s\n' "$n" > "$counter"
-  echo "$n"
-}
+have_git() { git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; }
 
 if [ "${RELEASE:-0}" = "1" ]; then
   # A release tag must match the manifest, or the tag is lying about what it contains.
@@ -64,22 +55,46 @@ if [ "${RELEASE:-0}" = "1" ]; then
   fi
   DEV_COUNT=0
   P=999
+  VERSION_HASH=""
   VERSION_NAME="$VERSION_BASE"
 else
-  DEV_COUNT="$(dev_count | tr -dc '0-9')"
+  if have_git; then
+    DEV_COUNT="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null | tr -dc '0-9')"
+    VERSION_HASH="$(git -C "$ROOT" rev-parse --short=8 HEAD 2>/dev/null || true)"
+    if [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
+      VERSION_HASH="${VERSION_HASH}+dirty"
+    fi
+  else
+    DEV_COUNT=1
+    VERSION_HASH="nogit"
+  fi
   [ -n "$DEV_COUNT" ] || DEV_COUNT=1
   [ "$DEV_COUNT" -ge 1 ] || DEV_COUNT=1
-  if [ "$DEV_COUNT" -gt 998 ]; then
-    echo "version.sh: $DEV_COUNT commits since the last tag exceeds the 998 dev builds per cycle. Cut a release." >&2
+
+  # Reserve this build's number: never lower than the last one, so the code only ever grows.
+  NEXT=1
+  if [ -f "$STAMP_FILE" ]; then
+    NEXT="$(tr -dc '0-9' < "$STAMP_FILE" || echo 1)"
+    [ -n "$NEXT" ] || NEXT=1
+  fi
+  NEXT=$((NEXT + 1))
+  printf '%s\n' "$NEXT" > "$STAMP_FILE"
+
+  # P must stay under a million: the formula multiplies the commit count by exactly that.
+  if [ "$NEXT" -ge 1000000 ]; then
+    echo "version.sh: build number $NEXT has outgrown the version code formula; cut a release" >&2
     exit 1
   fi
-  P="$DEV_COUNT"
-  VERSION_NAME="$VERSION_BASE-dev.$DEV_COUNT"
+  P=$(( DEV_COUNT * 1000000 + NEXT ))
+  if [ "$P" -gt 999999999 ]; then
+    echo "version.sh: versionCode would overflow an int; cut a release" >&2
+    exit 1
+  fi
+  VERSION_NAME="$VERSION_BASE-dev.g$VERSION_HASH"
 fi
 
 # versionCode = MAJOR*10_000_000 + MINOR*100_000 + PATCH*1_000 + P
-# P=999 for a release, so a release always outranks every prerelease that preceded it — otherwise
-# the camera refuses the release as a downgrade after an install of the dev build.
+# P=999 for a release, so a release outranks every prerelease before it.
 VERSION_CODE=$(( MAJOR * 10000000 + MINOR * 100000 + PATCH * 1000 + P ))
 
-export VERSION_BASE VERSION_NAME VERSION_CODE DEV_COUNT
+export VERSION_BASE VERSION_NAME VERSION_CODE DEV_COUNT VERSION_HASH
