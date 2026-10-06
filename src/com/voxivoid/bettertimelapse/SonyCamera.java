@@ -473,6 +473,24 @@ public final class SonyCamera {
     }
 
 
+    /**
+     * What the camera holds right now for the settings this app touches, read back from the body.
+     *
+     * <p>The successor to the probe: the probe asked which spelling the body accepts, this says
+     * whether the writes that followed actually landed. A setting that was sent is not a setting that
+     * took, and only a read-back tells the two apart.
+     */
+    public String settingsReport() {
+        if (camera == null) return "(no camera)";
+        StringBuilder b = new StringBuilder();
+        String[] keys = { "silent-shutter-mode", "drive-mode" };
+        for (int i = 0; i < keys.length; i++) {
+            String v = readKey(keys[i]);
+            b.append(keys[i]).append('=').append(v == null ? "absent" : v).append(i == 0 ? "  " : "");
+        }
+        return b.toString();
+    }
+
     private String readKey(String key) {
         try {
             return camera.getParameters().get(key);
@@ -590,19 +608,35 @@ public final class SonyCamera {
      * call or refuses the value, so the caller can tell the user rather than leaving them with a
      * setting that silently did not apply.
      */
+    /**
+     * The drive mode, by the name the camera itself reports.
+     *
+     * <p>{@code drive-mode} reads back as {@code single} on this body, lower case: the values are the
+     * camera's, and an upper-case constant from the SDK is a different string as far as it is
+     * concerned.
+     */
     public boolean setDriveMode(String mode) {
-        // Try the camera's own parameter first: it needs no Sony method to exist.
-        if (setParameterKey("drive-mode", mode)) return true;
+        String value = mode == null ? "" : mode.toLowerCase(java.util.Locale.US);
+        if (setParameterKey("drive-mode", value)) return true;
         return callModifier("setDriveMode", new Class<?>[] { String.class }, new Object[] { mode });
     }
 
+
     /** Silent shutter, where the body has it. */
+    /**
+     * The silent shutter, by whichever route this body accepts.
+     *
+     * <p>The value came from the camera, not from a guess: asked to accept every plausible spelling,
+     * it took {@code "true"} and rejected {@code "on"} — which is why the setting did nothing while
+     * the code looked correct. The Sony modifier answers as well, so it is the second route rather
+     * than the only one.
+     */
     public boolean setSilentShutter(boolean on) {
-        String value = on ? "on" : "off";
-        if (setParameterKey("silent-shutter-mode", value)) return true;
+        if (setParameterKey("silent-shutter-mode", on ? "true" : "false")) return true;
         return callModifier("setSilentShutterMode", new Class<?>[] { boolean.class },
                 new Object[] { Boolean.valueOf(on) });
     }
+
 
     /** Lock the exposure after the first frame, for consistency across a long run. */
     public boolean setAutoExposureLock(boolean on) {

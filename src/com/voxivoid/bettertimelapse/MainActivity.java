@@ -235,17 +235,19 @@ public class MainActivity extends Activity {
         // The drive mode is applied whichever it is, not only SINGLE: a body left in a bracket or
         // burst mode takes several frames per press, which is exactly the kind of surprise the old app
         // shipped and this one must not.
-        String wanted = plan.driveMode() == Plan.DRIVE_BURST ? "BURST"
-                : plan.driveMode() == Plan.DRIVE_BRACKET3 ? "BRACKET" : "SINGLE";
+        // Lower case: the camera reports "single", so that is the string it takes.
+        String wanted = plan.driveMode() == Plan.DRIVE_BURST ? "burst"
+                : plan.driveMode() == Plan.DRIVE_BRACKET3 ? "bracket" : "single";
         if (!camera.setDriveMode(wanted)) failed.append("\u9a71\u52a8 ");                    // 驱动
 
-        if (plan.silentShutter() && !camera.setSilentShutter(true)) failed.append("\u9759\u97f3 ");  // 静音
+        boolean silentTook = !plan.silentShutter() || camera.setSilentShutter(true);
+        if (!silentTook) failed.append("\u9759\u97f3 ");                                     // 静音
 
         if (plan.autoExposureLock() && !camera.setAutoExposureLock(true)) failed.append("AEL ");
 
-        // Ask the body which key it takes, once, and keep the answer. This is the difference between
-        // "silent shutter does not work here" and "silent shutter was never sent the right name".
-        panel.setNumbers("\u9759\u97f3\u63a2\u9488 " + camera.probeSilentShutterKeys());   // 静音探针
+        // What the body actually holds, read back after the writes above: the difference between "the
+        // setting was applied" and "the setting was sent".
+        panel.setNumbers(camera.settingsReport());
 
         String problem = camera.modifierProblem();
         if (problem.length() > 0) {
