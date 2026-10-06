@@ -243,6 +243,10 @@ public class MainActivity extends Activity {
 
         if (plan.autoExposureLock() && !camera.setAutoExposureLock(true)) failed.append("AEL ");
 
+        // Ask the body which key it takes, once, and keep the answer. This is the difference between
+        // "silent shutter does not work here" and "silent shutter was never sent the right name".
+        panel.setNumbers("\u9759\u97f3\u63a2\u9488 " + camera.probeSilentShutterKeys());   // 静音探针
+
         String problem = camera.modifierProblem();
         if (problem.length() > 0) {
             // This one disables every setting above at once, so it goes on the evidence line.

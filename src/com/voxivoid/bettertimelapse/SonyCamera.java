@@ -255,6 +255,8 @@ public final class SonyCamera {
                 modifierProblem = name + " returned null";
                 return null;
             }
+            // Deliberately no apply here: an untouched modifier has nothing to apply, and attempting
+            // it marked the whole channel unavailable before a single setting had been made.
             return made;
         } catch (Throwable t) {
             return null;   // try the next shape
@@ -314,16 +316,125 @@ public final class SonyCamera {
      * the modifier and then called {@code setParameters} unconditionally, which is why a body that
      * rejected one setting still looked configured (TimeLapse {@code ShootActivity.java:213}).
      */
+    /**
+     * Push a modified parameter set back into the camera.
+     *
+     * <p>The old app's build files suggested the modifier applies itself with
+     * {@code applyParameters(Camera.Parameters)}. On this body that method does not exist — the call
+     * raised {@code NoSuchMethodException} — and because every camera-side setting travels through
+     * here, silent shutter, drive mode and exposure lock were all dead while their rows read as
+     * applied. Three shapes are tried, and the one that worked is recorded rather than assumed.
+     */
     private void applyModifier(Object mod) {
+        if (applyModifierWith(mod, "applyParameters", new Class<?>[] { android.hardware.Camera.Parameters.class })) return;
+        if (applyModifierWith(mod, "applyParameters", new Class<?>[] { android.hardware.Camera.class })) return;
+        if (applyModifierWith(mod, "apply", new Class<?>[0])) return;
+        modifierProblem = "no apply method worked; modifier methods: " + modifierMethods();
+    }
+
+    private boolean applyModifierWith(Object mod, String name, Class<?>[] types) {
         try {
-            android.hardware.Camera.Parameters params = camera.getParameters();
-            mod.getClass().getMethod("applyParameters", android.hardware.Camera.Parameters.class).invoke(mod, params);
-            camera.setParameters(params);
+            Object[] args = types.length == 0 ? new Object[0]
+                    : new Object[] { types[0] == android.hardware.Camera.class ? camera : paramsOf() };
+            Object result = mod.getClass().getMethod(name, types).invoke(mod, args);
+            // A modifier that hands back a Parameters is telling us where the result went.
+            if (result instanceof android.hardware.Camera.Parameters) {
+                camera.setParameters((android.hardware.Camera.Parameters) result);
+            }
+            applyMethod = name + "/" + types.length;
+            return true;
         } catch (Throwable t) {
-            lastError = shortName(t);
-            modifierProblem = "applyParameters/setParameters: " + lastError;
+            return false;
         }
     }
+
+    /** Which apply shape worked, e.g. {@code applyParameters/1}; empty before one has. */
+    private String applyMethod = "";
+
+    public String applyMethod() {
+        return applyMethod;
+    }
+
+    /**
+     * Set a live camera parameter by the name the camera itself uses, straight into
+     * {@code Camera.Parameters}. This is the route that does not depend on any Sony method name: the
+     * camera declares its own parameter strings, and {@link #parameterKeys()} reads them back.
+     */
+    public boolean setParameterKey(String key, String value) {
+        if (camera == null) return false;
+        try {
+            android.hardware.Camera.Parameters params = camera.getParameters();
+            params.set(key, value);
+            camera.setParameters(params);
+            // Write, then read back. Setting an unknown key does not throw, so "no exception" is not
+            // "it took" — and a setting that silently did nothing is the bug this whole round is about.
+            android.hardware.Camera.Parameters after = camera.getParameters();
+            String read = after.get(key);
+            return read != null && read.equalsIgnoreCase(value);
+        } catch (Throwable t) {
+            lastError = shortName(t);
+            return false;
+        }
+    }
+
+    /**
+     * Try each key a body might use for the silent shutter, and report which one the camera accepted.
+     * The name is the camera's, not the SDK's, so it is asked for rather than assumed.
+     */
+    public String probeSilentShutterKeys() {
+        if (camera == null) return "(no camera)";
+        String[] keys = { "silent-shutter-mode", "silent-shutter", "silent-shutter-mode-setting" };
+        String before = readKey(keys[0]);
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < keys.length; i++) {
+            boolean took = setParameterKey(keys[i], "on");
+            b.append(keys[i]).append(took ? "=OK " : "=no ");
+            if (took) setParameterKey(keys[i], "off");   // leave the camera as it was found
+        }
+        b.append("| present: ").append(before == null ? "no" : before);
+        return b.toString();
+    }
+
+    private String readKey(String key) {
+        try {
+            return camera.getParameters().get(key);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+
+    /**
+     * Every parameter name the body reports, from {@code Camera.Parameters.flatten()}. Guessing these
+     * is what turned "silent shutter" into a dead setting: the names are the camera's, not the SDK's.
+     */
+    public String parameterKeys() {
+        if (camera == null) return "(no camera)";
+        try {
+            android.hardware.Camera.Parameters params = camera.getParameters();
+            String flat = params.flatten();
+            if (flat == null) return "(no parameters)";
+            String[] lines = flat.split(";");
+            StringBuilder b = new StringBuilder();
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i];
+                int eq = line.indexOf('=');
+                String key = eq > 0 ? line.substring(0, eq) : line;
+                String lower = key.toLowerCase(java.util.Locale.US);
+                // The ones a time-lapse could need, plus anything Sony-flavoured.
+                if (lower.indexOf("silent") >= 0 || lower.indexOf("drive") >= 0
+                        || lower.indexOf("burst") >= 0 || lower.indexOf("bracket") >= 0
+                        || lower.indexOf("shutter") >= 0 || lower.indexOf("focus") >= 0
+                        || lower.indexOf("review") >= 0) {
+                    b.append(key).append(' ');
+                }
+            }
+            return b.length() == 0 ? "(no matching keys of " + lines.length + ")" : b.toString();
+        } catch (Throwable t) {
+            return "(flatten failed: " + shortName(t) + ")";
+        }
+    }
+
 
     /** Ask the body what it supports, once. Every answer is allowed to be unknown. */
     public Capabilities capabilities() {
@@ -402,11 +513,15 @@ public final class SonyCamera {
      * setting that silently did not apply.
      */
     public boolean setDriveMode(String mode) {
+        // Try the camera's own parameter first: it needs no Sony method to exist.
+        if (setParameterKey("drive-mode", mode)) return true;
         return callModifier("setDriveMode", new Class<?>[] { String.class }, new Object[] { mode });
     }
 
     /** Silent shutter, where the body has it. */
     public boolean setSilentShutter(boolean on) {
+        String value = on ? "on" : "off";
+        if (setParameterKey("silent-shutter-mode", value)) return true;
         return callModifier("setSilentShutterMode", new Class<?>[] { boolean.class },
                 new Object[] { Boolean.valueOf(on) });
     }
