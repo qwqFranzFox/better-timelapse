@@ -509,16 +509,18 @@ public final class PanelView extends View {
             canvas.drawText(clip(fontError, w - padding * 2f), padding, y - lineHeight, paint);
             paint.setColor(colDim);
         }
+        // Wrapped, not clipped. A single clipped line threw away most of the method list the one time
+        // the list was the whole point — diagnostics that do not fit are diagnostics that do not exist.
         float lines = fontError.length() > 0 ? 2f : 1f;
+        float wrapWidth = w - padding * 2f;
         if (evidence.length() > 0) {
             paint.setColor(colWarn);
-            canvas.drawText(clip(evidence, w - padding * 2f), padding, y - lineHeight * lines, paint);
+            lines += wrap(canvas, evidence, padding, y - lineHeight * lines, wrapWidth, 3);
             paint.setColor(colDim);
-            lines += 1f;
         }
         if (numbers.length() > 0) {
             paint.setColor(colDim);
-            canvas.drawText(clip(numbers, w - padding * 2f), padding, y - lineHeight * lines, paint);
+            wrap(canvas, numbers, padding, y - lineHeight * lines, wrapWidth, 2);
         }
 
         // Two markers share this row, so they are laid out from the right edge inwards rather than
@@ -560,6 +562,34 @@ public final class PanelView extends View {
     private float baselineIn(float top, float height, Paint p) {
         float ascent = p.ascent(), descent = p.descent();
         return top + (height - (descent - ascent)) / 2f - ascent;
+    }
+
+    /**
+     * Draw text wrapped across at most {@code maxLines} lines, and return how many were used.
+     *
+     * @return the number of lines drawn
+     */
+    private float wrap(Canvas canvas, String text, float x, float baseline, float width, int maxLines) {
+        float lineHeight = paint.descent() - paint.ascent();
+        int start = 0, drawn = 0;
+        while (start < text.length() && drawn < maxLines) {
+            int end = start;
+            while (end < text.length() && paint.measureText(text, start, end + 1) <= width) end++;
+            if (end == start) end = Math.min(text.length(), start + 1);
+            // Prefer to break at a space so the method names stay readable.
+            int breakAt = end;
+            if (end < text.length()) {
+                int space = text.lastIndexOf(' ', end);
+                if (space > start) breakAt = space;
+            }
+            String piece = text.substring(start, breakAt);
+            if (drawn == maxLines - 1 && breakAt < text.length()) piece = piece + "\u2026";   // …
+            canvas.drawText(piece, x, baseline, paint);
+            baseline -= lineHeight;
+            drawn++;
+            start = breakAt < text.length() ? breakAt + 1 : text.length();
+        }
+        return drawn;
     }
 
     /** Cut a string to fit a width, with an ellipsis. Drawing over the next column is worse. */

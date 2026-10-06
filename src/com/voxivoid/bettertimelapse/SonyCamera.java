@@ -276,9 +276,19 @@ public final class SonyCamera {
                     return a.getName().compareTo(c.getName());
                 }
             });
+            // Only the names that could plausibly carry a parameter modifier, plus a count of the
+            // rest. A full dump of every method would wrap past the screen and bury the answer.
+            int others = 0;
             for (java.lang.reflect.Method m : methods) {
                 if (m.getDeclaringClass() == Object.class) continue;
-                b.append(m.getName()).append('(');
+                String name = m.getName();
+                String lower = name.toLowerCase(java.util.Locale.US);
+                if (lower.indexOf("param") < 0 && lower.indexOf("modif") < 0
+                        && lower.indexOf("silent") < 0) {
+                    others++;
+                    continue;
+                }
+                b.append(name).append('(');
                 Class<?>[] p = m.getParameterTypes();
                 for (int i = 0; i < p.length; i++) {
                     if (i > 0) b.append(',');
@@ -286,6 +296,7 @@ public final class SonyCamera {
                 }
                 b.append(") ");
             }
+            b.append("| ").append(others).append(" other methods");
         } catch (Throwable t) {
             b.append("(listing failed: ").append(shortName(t)).append(')');
         }
