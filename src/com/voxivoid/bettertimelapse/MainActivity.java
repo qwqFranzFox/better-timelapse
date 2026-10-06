@@ -659,8 +659,14 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             cardNewestStamp = card.newestStamp();
             cardNewestPath = card.newestPath();
             cardNewestBytes = card.newestBytes();
-            cardRoots = card.rootsReport();
-            cardRoot = card.rootInUse();
+            // The root report is a walk of every candidate root, and on this body all of them resolve to
+            // the same tree — five directory walks per frame for a diagnostic that only changes when the
+            // root does. It is taken again when that happens, and not otherwise.
+            String rootNow = card.rootInUse();
+            if (cardRoots.length() == 0 || !rootNow.equals(cardRoot)) {
+                cardRoot = rootNow;
+                cardRoots = card.rootsReport();
+            }
 
             if (cardCount != Frames.UNKNOWN) sawCard = true;
             if (cardNewestBytes > 0) measuredFrameBytes = cardNewestBytes;

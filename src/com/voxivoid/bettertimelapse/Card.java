@@ -32,9 +32,10 @@ public final class Card {
      * Where the camera might keep its files.
      *
      * <p>{@code Environment.getExternalStorageDirectory()} answers where <em>this app</em> may write,
-     * which on a camera is not necessarily where the camera writes. On this body the free-space figure
-     * is readable while the DCIM tree apparently is not, which is only possible if the two are
-     * different places. So every plausible root is checked and the first one holding images wins.
+     * which on a camera is not necessarily where the camera writes. So every plausible root is checked
+     * and the first one with a readable {@code DCIM} wins — first readable, not first with images: the
+     * walk that follows knows how many images there are, and counting them here to choose between roots
+     * would be that walk once per candidate.
      */
     private static final String[] ROOTS = {
             null,                       // Environment.getExternalStorageDirectory()
