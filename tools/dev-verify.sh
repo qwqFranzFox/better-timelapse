@@ -267,18 +267,21 @@ rm -rf "$OUT"
 mkdir -p "$OUT/pure" "$OUT/all"
 write_stubs
 
-say "[1/3] the decision classes, with no android.jar"
+say "[1/4] the decision classes, with no android.jar"
 UNIT_FILES=()
 for u in ${UNITS[@]+"${UNITS[@]}"}; do UNIT_FILES+=("$SOURCE_DIR/$APP_PACKAGE_PATH/$u.java"); done
 "$JAVA/javac" -encoding UTF-8 --release 8 -Xlint:-options -d "$OUT/pure" "${UNIT_FILES[@]}"
 echo "      ${#UNIT_FILES[@]} classes compiled with no Android on the classpath"
 
-say "[2/3] every source file, against the stubs"
+say "[2/4] every source file, against the stubs"
 "$JAVA/javac" -encoding UTF-8 --release 8 -Xlint:-options -d "$OUT/all" \
     $(find "$STUBS" -name '*.java') "$SOURCE_DIR/$APP_PACKAGE_PATH"/*.java
 echo "      $(ls "$SOURCE_DIR/$APP_PACKAGE_PATH"/*.java | wc -l) source files compiled"
 
-say "[3/3] the bundled font"
+say "[3/4] the bundled font and the asset path the code asks for"
+if command -v python3 >/dev/null 2>&1; then
+    python3 tools/check-asset-path.py --pre-build
+fi
 if command -v python3 >/dev/null 2>&1; then
     python3 tools/check-font.py
 else

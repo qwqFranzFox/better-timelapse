@@ -33,6 +33,9 @@ command -v python3 >/dev/null 2>&1 || die "python3 is required for the APK check
 
 say "$APK: $(wc -c < "$APK") bytes, sha256 $(sha256sum "$APK" | cut -c1-16)…"
 python3 tools/check-apk.py "$APK" --package "$APP_PACKAGE" --native-lib "lib$NATIVE_LIB.so"
+# The font is asked for by name at run time; a case mismatch is invisible in the build and fatal on
+# the camera, and it cost two rounds here. Compare the name the code uses with the name in the APK.
+python3 tools/check-asset-path.py "$APK"
 
 say "the version this build produced"
 # version.sh derives it, and the APK carries it because aapt read the injected copy of the manifest.

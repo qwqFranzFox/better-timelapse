@@ -37,7 +37,7 @@ FONT_DIR = os.path.join(ROOT, "assets", "fonts")
 FAMILY = "Sarasa UI SC"
 STYLE = "Regular"
 
-OUT_NAME = "BetterTimelapseCJKsc-Regular.ttf"
+OUT_NAME = "BetterTimelapseCjkSC-Regular.ttf"
 DEFAULT_SOURCES = [
     "/usr/share/fonts/sarasa-gothic/Sarasa-Regular.ttc",
     "/usr/share/fonts/sarasa-gothic/SarasaGothic-Regular.ttf",

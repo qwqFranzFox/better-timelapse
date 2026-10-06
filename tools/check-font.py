@@ -15,7 +15,7 @@ from importlib.machinery import SourceFileLoader
 sf = SourceFileLoader("subset_font", os.path.join(HERE, "subset-font.py")).load_module()
 
 ROOT = os.path.dirname(HERE)
-FONT = os.path.join(ROOT, "assets", "fonts", "BetterTimelapseCJKsc-Regular.ttf")
+FONT = os.path.join(ROOT, "assets", "fonts", "BetterTimelapseCjkSC-Regular.ttf")
 
 def main():
     needed = sf.collect_characters()

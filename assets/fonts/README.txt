@@ -1,7 +1,7 @@
 The display font
 ================
 
-    BetterTimelapseCJKsc-Regular.ttf    315 characters, about 55 KB
+    BetterTimelapseCjkSC-Regular.ttf    315 characters, about 55 KB
 
 Why it is here
 --------------
