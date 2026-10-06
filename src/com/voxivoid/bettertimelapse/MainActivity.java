@@ -153,7 +153,8 @@ public class MainActivity extends Activity {
             // Boxes on screen, and the reason on screen with them. A silent catch here is what made
             // this unfixable from a photograph for two rounds.
             panel.setFontNote("\u5b57\u4f53\u672a\u52a0\u8f7d");                            // 字体未加载
-            panel.setCameraNote(UiFont.report() + "  " + UiFont.assetListing(this));
+            // Its own line, so nothing overwrites the reason.
+            panel.setFontError(UiFont.report() + "  " + UiFont.assetListing(this));
         }
     }
 

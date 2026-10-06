@@ -141,6 +141,8 @@ def main():
     ap.add_argument("--source", help="the Sarasa file to cut (default: the packaged one)")
     ap.add_argument("--check", action="store_true", help="report coverage, write nothing")
     ap.add_argument("--out", default=os.path.join(FONT_DIR, OUT_NAME))
+    ap.add_argument("--conservative", action="store_true",
+                    help="also drop the OpenType layout and vertical-writing tables")
     args = ap.parse_args()
 
     needed = collect_characters()
@@ -176,6 +178,14 @@ def main():
     options.notdef_outline = True
     options.recalc_bounds = True
     options.drop_tables += ["DSIG"]
+    # A conservative table set, on top of the above. `layout_features = []` empties the OpenType
+    # layout tables without removing them, and a subset that still carries GSUB/GPOS/GDEF/VORG/vhea/
+    # vmtx is a lot of machinery for an engine that shapes nothing and lays text out horizontally
+    # only. Recipe Lab ships those tables and its font works, so this is not known to be the cause —
+    # it is the cheapest difference to remove while the real error is still unidentified.
+    if args.conservative:
+        options.drop_tables += ["GDEF", "GPOS", "GSUB", "VORG", "vhea", "vmtx",
+                                "BASE", "STAT", "gasp", "kern", "morx", "mort"]
     options.name_IDs = ["*"]
     options.name_legacy = True
     options.name_languages = ["*"]

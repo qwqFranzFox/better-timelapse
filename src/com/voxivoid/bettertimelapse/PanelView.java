@@ -58,6 +58,14 @@ public final class PanelView extends View {
     // ---- what the shell knows that the engine does not ----
     private String cameraNote = "";
     private String fontNote = "";
+
+    /**
+     * A font failure, on its own line above the legend, where nothing else can overwrite it. The
+     * camera note shares the status line with the plan summary and the state, so a long message there
+     * gets clipped or replaced by whatever the shell says next — which is how the reason for two
+     * rounds of "boxes on screen" stayed invisible.
+     */
+    private String fontError = "";
     private int batteryPercent = -1;
     private boolean charging;
     private long cardFreeBytes = -1;
@@ -170,6 +178,12 @@ public final class PanelView extends View {
      */
     public void setFontNote(String note) {
         fontNote = note == null ? "" : note;
+        invalidate();
+    }
+
+    /** A font failure, drawn on its own line. Empty means the font is fine. */
+    public void setFontError(String message) {
+        fontError = message == null ? "" : message;
         invalidate();
     }
 
@@ -434,6 +448,16 @@ public final class PanelView extends View {
         // exactly h - padding puts its descenders off the bottom edge.
         float y = h - padding - paint.descent();
         canvas.drawText(clip(legend, w - padding * 2f), padding, y, paint);
+
+        // The font failure gets its own line above the legend: it is the answer to "why is every
+        // label a box", and a message that can be clipped or overwritten is a message that wastes a
+        // round trip to the camera.
+        if (fontError.length() > 0) {
+            paint.setColor(colWarn);
+            float lineHeight = paint.descent() - paint.ascent();
+            canvas.drawText(clip(fontError, w - padding * 2f), padding, y - lineHeight, paint);
+            paint.setColor(colDim);
+        }
 
         // Two markers share this row, so they are laid out from the right edge inwards rather than
         // both claiming the corner and drawing over each other.
