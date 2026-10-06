@@ -381,19 +381,97 @@ public final class SonyCamera {
      * Try each key a body might use for the silent shutter, and report which one the camera accepted.
      * The name is the camera's, not the SDK's, so it is asked for rather than assumed.
      */
+    /**
+     * Ask the body, both ways, how the silent shutter is switched, and report which way answered.
+     *
+     * <p>Two routes exist and neither can be assumed: the camera's own parameter string (no Sony
+     * method needed) and the Sony parameter modifier (no parameter name needed). On this body the
+     * parameter key exists — it reads back {@code false} — but rejects every spelling of "on", so the
+     * question is whether it is read-only, and whether the modifier can do what the key cannot.
+     */
     public String probeSilentShutterKeys() {
         if (camera == null) return "(no camera)";
-        String[] keys = { "silent-shutter-mode", "silent-shutter", "silent-shutter-mode-setting" };
-        String before = readKey(keys[0]);
+        String original = readKey("silent-shutter-mode");
         StringBuilder b = new StringBuilder();
-        for (int i = 0; i < keys.length; i++) {
-            boolean took = setParameterKey(keys[i], "on");
-            b.append(keys[i]).append(took ? "=OK " : "=no ");
-            if (took) setParameterKey(keys[i], "off");   // leave the camera as it was found
+
+        // Route 1: the camera's own parameter, every plausible spelling of "on".
+        b.append("key:");
+        String[] values = { "on", "true", "1" };
+        boolean took = false;
+        for (int i = 0; i < values.length; i++) {
+            if (setParameterKey("silent-shutter-mode", values[i])) {
+                b.append(values[i]).append("=OK");
+                took = true;
+                break;
+            }
         }
-        b.append("| present: ").append(before == null ? "no" : before);
+        if (!took) b.append("=").append(original == null ? "absent" : "readonly");
+        if (original != null) setParameterKeyRaw("silent-shutter-mode", original);
+
+        // Route 2: the Sony modifier, if this body has one.
+        b.append(" modifier:");
+        if (modifier == null) {
+            b.append("none(").append(modifierProblem.length() > 0 ? modifierProblem : "?").append(')');
+        } else {
+            boolean byBoolean = callModifierQuiet("setSilentShutterMode", new Class<?>[] { boolean.class },
+                    new Object[] { Boolean.TRUE });
+            boolean byObject = !byBoolean && callModifierQuiet("setSilentShutterMode",
+                    new Class<?>[] { Boolean.class }, new Object[] { Boolean.TRUE });
+            boolean byString = !byBoolean && !byObject && callModifierQuiet("setSilentShutterMode",
+                    new Class<?>[] { String.class }, new Object[] { "on" });
+            b.append(byBoolean ? "boolean=OK" : byObject ? "Boolean=OK" : byString ? "String=OK"
+                    : "no method(" + modifierProblem + ")");
+            if (byBoolean || byObject || byString) setSilentShutterQuiet(false);
+        }
+
+        b.append(" | drive:").append(readKey("drive-mode"));
         return b.toString();
     }
+
+    /** Apply a modifier call, silently: for probing, where a failure is an answer and not an error. */
+    private boolean callModifierQuiet(String name, Class<?>[] types, Object[] args) {
+        try {
+            modifier.getClass().getMethod(name, types).invoke(modifier, args);
+            applyModifierQuiet();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void applyModifierQuiet() {
+        String saved = modifierProblem;
+        applyModifier(modifier);
+        modifierProblem = saved;
+    }
+
+    private void setSilentShutterQuiet(boolean on) {
+        callModifierQuiet("setSilentShutterMode", new Class<?>[] { boolean.class },
+                new Object[] { Boolean.valueOf(on) });
+    }
+
+
+    /** Write without the read-back check, for putting a value back the way it was. */
+    private boolean setParameterKeyRaw(String key, String value) {
+        try {
+            android.hardware.Camera.Parameters params = camera.getParameters();
+            params.set(key, value);
+            camera.setParameters(params);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Whether writing the key changes anything when it is read back. */
+    private String isWritable(String key, String original) {
+        if (original == null) return "unknown";
+        String probe = "on".equalsIgnoreCase(original) ? "off" : "on";
+        boolean took = setParameterKey(key, probe);
+        setParameterKeyRaw(key, original);
+        return took ? "yes" : "no";
+    }
+
 
     private String readKey(String key) {
         try {
