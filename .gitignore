@@ -1,0 +1,32 @@
+# The dev build counter (tools/version.sh) — build state, never committed.
+/.build-number
+
+# Build output — never committed.
+/out/
+*.apk
+*.apk.sha256
+*.keystore
+
+# The build parks the platform's errno.h shim here for the duration of a build
+# (see build.sh); it must never be committed.
+jni/platform/errno.h.updater_only
+
+# The build toolchain tools/setup-toolchain.sh installs, so it stays out of the repository.
+/.toolchain/
+
+# Editors
+/.idea/
+*.iml
+.DS_Store
+
+# The reference projects in this workspace. Each is a repository of its own with its own history, and
+# this app does not vendor any of them: TimeLapse is the app being learned from, recipe-lab-sony-pmca
+# is where the engineering practice comes from, Sony-PMCA-RE is the install tool. Keeping them out
+# stops their history and their build output being dragged into this one.
+/TimeLapse/
+/recipe-lab-sony-pmca/
+/Sony-PMCA-RE/
+
+# Python bytecode from the tools/ scripts.
+__pycache__/
+*.pyc

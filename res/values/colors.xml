@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The panel's palette. Dark on purpose: this screen is looked at from behind a tripod at night, and a
+  bright panel is both an eye strain and a light source in the frame. The values are read by
+  MainActivity and handed to PanelView, which keeps every drawing decision out of the pure classes.
+-->
+<resources>
+    <color name="background">#FF0C0C0E</color>
+    <color name="text">#FFE6E6E6</color>
+    <color name="dim">#FF8A8A8A</color>
+    <color name="selected">#FF23232A</color>
+    <color name="accent">#FF6FB3FF</color>
+    <color name="warn">#FFFF7043</color>
+    <color name="good">#FF7ED37E</color>
+</resources>

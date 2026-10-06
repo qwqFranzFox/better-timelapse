@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  minSdkVersion/targetSdkVersion are 10: the installer warns above 10 and the install can fail.
+  Only the permissions this app uses. There is no networking here, so no INTERNET, and no Wi-Fi
+  permission either — those the old app requested and never used (docs/PAIN-POINTS.md D-14).
+  versionCode/versionName hold the NEXT TARGET RELEASE and are the single source of truth: a
+  build writes a copy under out/ and points aapt at that, and never rewrites this file.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.voxivoid.bettertimelapse"
+    android:versionCode="1000"
+    android:versionName="0.1.0">
+    <uses-sdk android:minSdkVersion="10" android:targetSdkVersion="10" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <application android:label="@string/app_name" android:icon="@drawable/ic_launcher">
+        <activity android:name=".MainActivity" android:label="@string/app_name"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
