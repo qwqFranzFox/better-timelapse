@@ -229,15 +229,20 @@ public final class Hud {
     }
 
     /** The progress line: landed frames against the plan, and how long the run has been going. */
-    public static String progressLine(int landed, int planned, long elapsedMs) {
+    public static String progressLine(int landed, int planned, int unverified, long elapsedMs) {
         String of;
         if (planned == Plan.FRAMES_UNLIMITED) {
             of = landed + FRAMES_UNIT;                                   // 张
         } else {
             of = landed + " / " + planned + FRAMES_UNIT;
         }
-        return "\u5df2\u843d\u76d8 " + of                                     // 已落盘
-                + "   \u5df2\u7528 " + clock(elapsedMs, false);               // 已用
+        String tail = "   \u5df2\u7528 " + clock(elapsedMs, false);          // 已用
+        if (unverified > 0) {
+            // Taken, not confirmed. Saying it is the difference between "the app cannot see this card"
+            // and "the app is losing frames", and the two need different answers.
+            tail += "   \u672a\u6838\u5b9e " + unverified + FRAMES_UNIT;    // 未核实 N 张
+        }
+        return "\u5df2\u843d\u76d8 " + of + tail;
     }
 
     /**

@@ -33,7 +33,9 @@ public final class Engine {
     public static final int EV_ENTER = 0, EV_TURN = 1, EV_MOVE = 2, EV_ADJUST = 3, EV_TRASH = 4,
             EV_HOLD_TRASH = 5, EV_SHUTTER = 6, EV_TICK = 7, EV_ACK = 8,
             /** The frame was handed to the camera but never appeared on the card. */
-            EV_TIMEOUT = 9;
+            EV_TIMEOUT = 9,
+            /** The camera reported a frame and the card count could not corroborate it. */
+            EV_UNVERIFIED = 10;
 
     // ---------------------------------------------------------------- what to do next
     public static final int ACT_NONE = 0, ACT_ARM_TIMER = 1, ACT_FIRE = 2;
@@ -84,6 +86,15 @@ public final class Engine {
 
     /** The last frame that landed, for the panel's "landed n / planned m". */
     private String lastFile = "";
+
+    /**
+     * Frames the camera reported that the card count could not corroborate.
+     *
+     * <p>Not a fault, and not hidden either. The camera writing its files somewhere this app cannot
+     * read is a different thing from a frame going missing, and the honest answer is "taken, not
+     * confirmed" rather than either "lost" or silence.
+     */
+    private int unverified;
 
     public Engine(Plan plan) {
         this.plan = plan;
@@ -168,6 +179,8 @@ public final class Engine {
                 return onAck();
             case EV_TIMEOUT:
                 return onFrameLost("no file", nowMs);
+            case EV_UNVERIFIED:
+                return onUnverified(nowMs);
             default:
                 return ACT_NONE;   // value edits are the panel's, not the machine's
         }
@@ -231,6 +244,7 @@ public final class Engine {
         landed = 0;
         attemptsForCurrentFrame = 0;
         consecutiveFailures = 0;
+        unverified = 0;
         lastFile = "";
         return ACT_NONE;
     }
@@ -260,6 +274,19 @@ public final class Engine {
      * The camera says a frame landed. {@code file} is the name the camera gave it, or an empty string
      * when the body does not report one.
      */
+    /**
+     * The camera reported the frame; the card count could not confirm it.
+     *
+     * <p>The frame counts as taken — the camera's own callback is the evidence that it fired — but the
+     * run remembers that it was not confirmed, and says so, because "this app cannot see the card" and
+     * "the card is losing frames" need different answers.
+     */
+    private int onUnverified(long nowMs) {
+        if (state != EXPOSING) return ACT_NONE;
+        unverified++;
+        return onShutter(nowMs);
+    }
+
     private int onShutter(long nowMs) {
         if (state != EXPOSING) return ACT_NONE;
         landed++;
@@ -284,6 +311,11 @@ public final class Engine {
      * due, so one slow write cannot drag the rest of the run out of phase. The lost frame is added to
      * {@code fired} but never to {@code landed}, and the difference is what the panel shows.
      */
+    /** Frames the camera reported that the card count could not corroborate. */
+    public int unverified() {
+        return unverified;
+    }
+
     public int onFrameLost(String why, long nowMs) {
         if (state != EXPOSING) return ACT_NONE;
         consecutiveFailures++;

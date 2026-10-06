@@ -304,8 +304,21 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The watchdog. It asks the card, not the camera, whether the frame arrived — the distinction the
-     * old app never made.
+     * The watchdog: how the card is consulted, and what happens when it cannot be.
+     *
+     * <p>The camera's shutter callback is the primary evidence that a frame was taken. The card count
+     * is corroboration, and corroboration that is <em>missing</em> is not evidence of absence: this
+     * app cannot always see the camera's files at all, and treating "the count did not move" as "the
+     * frame was lost" told the user every single frame had failed to write while the frames were
+     * arriving perfectly well. A missing measurement was read as a negative one.
+     *
+     * <p>So three outcomes, and they are different things:
+     *
+     * <ul>
+     *   <li>the count moved — the frame is confirmed;</li>
+     *   <li>the count is unavailable — the frame counts as taken and is reported as unconfirmed;</li>
+     *   <li>the card went from readable to unreadable — a fault, because retrying cannot help.</li>
+     * </ul>
      */
     private final Runnable onCheckLanding = new Runnable() {
         @Override
@@ -313,19 +326,21 @@ public class MainActivity extends Activity {
             if (engine.state() != Engine.EXPOSING) return;      // the shutter callback got there first
             card.refresh();
             if (Frames.frameArrived(cardAtFire, card.count(), engine.plan())) {
-                settleFrame();
+                settleFrame(true);
                 return;
             }
-            if (!card.readable()) {
-                // A card that was readable when the frame was fired and is not now is a card fault,
-                // not a slow write: retrying will not help.
+            if (!card.readable() && cardAtFire != Frames.UNKNOWN) {
+                // It was readable when the frame was fired and is not now: a card fault, not a slow
+                // write, so retrying cannot help.
                 engine.stop(Engine.FAULT_CARD, now());
                 panel.invalidate();
                 return;
             }
             if (now() - firedAtMs >= LAND_TIMEOUT_MS) {
-                panel.setCameraNote("\u5361\u4e0a\u672a\u51fa\u73b0\u65b0\u6587\u4ef6");       // 卡上未出现新文件
-                engine.onFrameLost("no file after " + LAND_TIMEOUT_MS + "ms", now());
+                // The file never showed up in the time a write takes. The camera did report the frame,
+                // so it counts — as unconfirmed, which is what it is.
+                engine.step(Engine.EV_UNVERIFIED, now());
+                panel.invalidate();
                 pump();
                 return;
             }
@@ -343,22 +358,28 @@ public class MainActivity extends Activity {
         @Override
         public void onShutter() {
             handler.removeCallbacks(onCheckLanding);
+            // The camera reported the frame; that is enough to count it. The card is read to confirm,
+            // never to contradict: a count this app cannot see is not a missing frame.
             card.refresh();
-            if (card.readable() && !Frames.frameArrived(cardAtFire, card.count(), engine.plan())) {
-                // The camera says yes and the card says nothing yet: give the write a moment before
-                // believing either of them.
-                handler.postDelayed(onCheckLanding, LAND_CHECK_MS);
-                return;
-            }
-            settleFrame();
+            settleFrame(Frames.frameArrived(cardAtFire, card.count(), engine.plan()));
         }
     };
 
-    /** Record the frame as landed and carry on: the engine decides what happens next. */
-    private void settleFrame() {
-        if (card.newestStamp() > 0) measuredFrameBytes = card.estimatedFrameBytes();
-        engine.setLastFile(card.newestName());
-        engine.step(Engine.EV_SHUTTER, now());
+    /**
+     * Record the frame as landed and carry on: the engine decides what happens next.
+     *
+     * @param confirmed whether the card count corroborated the frame. Unconfirmed is not failed, and
+     *                  the engine keeps the two apart so the panel can say "taken, not confirmed"
+     *                  rather than claiming a loss it cannot see.
+     */
+    private void settleFrame(boolean confirmed) {
+        if (confirmed) {
+            if (card.newestStamp() > 0) measuredFrameBytes = card.estimatedFrameBytes();
+            engine.setLastFile(card.newestName());
+            engine.step(Engine.EV_SHUTTER, now());
+        } else {
+            engine.step(Engine.EV_UNVERIFIED, now());
+        }
         panel.invalidate();
         pump();
     }

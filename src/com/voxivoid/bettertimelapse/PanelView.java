@@ -450,7 +450,7 @@ public final class PanelView extends View {
 
         paint.setTextSize(smallSize);
         paint.setColor(colText);
-        canvas.drawText(Hud.progressLine(engine.landed(), planned, now()),
+        canvas.drawText(Hud.progressLine(engine.landed(), planned, engine.unverified(), now()),
                 padding, baselineIn(barTop + barHeight, height * 0.42f, paint), paint);
 
         if (engine.meanIntervalMs() > 0) {
