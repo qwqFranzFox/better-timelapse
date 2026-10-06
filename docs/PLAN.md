@@ -178,7 +178,7 @@ Step next(State s, Event e, long nowMs);   // 纯函数：状态 + 事件 + 时�
 
 ### 4.1 按键模型
 
-直接继承 recipe-lab 已经验证过的手势模型（`Keys.Hold`：`IGNORE / ARM / SHORT / NONE / HOLD` 五态，`oneShot()` 丢弃重复事件，`trashHoldActs()` 处理「机身丢失松键」）。**与 recipe-lab 保持「方向键 = 换行、左右 = 改值」的一致语义**，这样两个 app 的操作记忆可以互用。
+直接继承 recipe-lab 已经验证过的手势模型（`Keys.Hold`：`IGNORE / ARM / SHORT / NONE / HOLD` 五态；重复事件由 `Hold.down()` 自己丢弃——中心/MENU/TRASH 的重复进不了状态机，四向与转盘保留重复；`Keys.trashHoldActs()` + `SonyCamera.keyDown()` 处理「机身丢失松键」）。**与 recipe-lab 保持「方向键 = 换行、左右 = 改值」的一致语义**，这样两个 app 的操作记忆可以互用。
 
 | 功能 | 所有机身都有 | 快捷键（探测到才画进图例） |
 |---|---|---|

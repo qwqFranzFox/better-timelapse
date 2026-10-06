@@ -59,10 +59,25 @@ public final class Device {
      * reported frames that were never written (docs/PAIN-POINTS.md U-06, U-16).
      */
     public static long freeBytes() {
+        return freeBytes(null);
+    }
+
+    /**
+     * The same, for the tree the app is actually reading.
+     *
+     * <p>The camera may write to a root this app only found by looking (see {@code Card}), and asking the
+     * platform about a different one is how a screen ends up reporting room on a card the run is not using.
+     * A null path means "wherever this app may write".
+     */
+    public static long freeBytes(String path) {
         try {
-            File dir = Environment.getExternalStorageDirectory();
-            if (dir == null) return UNKNOWN;
-            StatFs stat = new StatFs(dir.getPath());
+            String where = path;
+            if (where == null) {
+                File dir = Environment.getExternalStorageDirectory();
+                if (dir == null) return UNKNOWN;
+                where = dir.getPath();
+            }
+            StatFs stat = new StatFs(where);
             return (long) stat.getAvailableBlocks() * (long) stat.getBlockSize();
         } catch (Throwable t) {
             return UNKNOWN;

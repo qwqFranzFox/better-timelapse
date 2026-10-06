@@ -137,9 +137,13 @@ public final class Hud {
                         ? "\u6bcf\u5f20\u4e4b\u540e\u5173\u5c4f\uff08\u5c1a\u672a\u5b9e\u73b0\uff09"  // 每张之后关屏（尚未实现）
                         : "\u5c4f\u5e55\u4e00\u76f4\u4eae\u7740";                                      // 屏幕一直亮着
             case Plan.ROW_SILENT:
+                // These two were the wrong way round: "每张不动机械快门" is what the row does when the
+                // silent shutter is ON, and it was being shown when it was off. What the user needs is the
+                // consequence of the value in front of them, not a fact about the body's capabilities --
+                // those are on the capability line.
                 return plan.silentShutter()
-                        ? "\u672c\u673a\u8eab\u5df2\u62a5\u544a\u652f\u6301"   // 本机身已报告支持
-                        : "\u6bcf\u5f20\u4e0d\u52a8\u673a\u68b0\u5feb\u95e8";   // 每张不动机械快门
+                        ? "\u7535\u5b50\u5feb\u95e8\uff0c\u65e0\u58f0"              // 电子快门，无声
+                        : "\u673a\u68b0\u5feb\u95e8\uff0c\u6709\u58f0";              // 机械快门，有声
             case Plan.ROW_DRIVE:
                 return "\u4e0d\u652f\u6301\u7684\u53d6\u503c\u4e0d\u8fdb\u5faa\u73af"; // 不支持的取值不进循环
             case Plan.ROW_AEL:

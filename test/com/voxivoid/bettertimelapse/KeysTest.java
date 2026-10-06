@@ -41,11 +41,13 @@ class KeysTest {
     }
 
     @Test
-    void oneShotKeysDoNotRepeatAndTheDialsDo() {
-        assertTrue(Keys.oneShot(Keys.K_ENTER));
-        assertTrue(Keys.oneShot(Keys.K_DELETE));
-        assertFalse(Keys.oneShot(Keys.K_UP), "a held direction key walks the panel");
-        assertFalse(Keys.oneShot(Keys.K_WHEEL_CW));
+    void aBodyThatLosesTheReleaseDoesNotGetToStopTheRun() {
+        // The probe answered "the key is already up", so the press was short however long the timer ran.
+        assertFalse(Keys.trashHoldActs(Boolean.FALSE));
+        // Still down: the hold was meant.
+        assertTrue(Keys.trashHoldActs(Boolean.TRUE));
+        // No answer from the body: treat it as a hold, which at worst asks a question.
+        assertTrue(Keys.trashHoldActs(null));
     }
 
     @Test

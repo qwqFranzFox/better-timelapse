@@ -27,6 +27,20 @@ class HudTest {
     }
 
     @Test
+    void theSilentRowSaysWhatTheValueDoesAndNotTheOtherWayRound() {
+        Plan plan = new Plan();
+        assertEquals("机械快门，有声", Hud.rowDetail(plan, Plan.ROW_SILENT), "off means the mechanical shutter");
+
+        plan.set(Plan.ROW_SILENT, 1);
+        assertEquals("电子快门，无声", Hud.rowDetail(plan, Plan.ROW_SILENT), "on means no shutter sound");
+
+        // They were the wrong way round: "每张不动机械快门" is a consequence of the silent shutter being
+        // ON, and it was shown when it was off.
+        plan.set(Plan.ROW_SILENT, 0);
+        assertFalse(Hud.rowDetail(plan, Plan.ROW_SILENT).contains("不动机械快门"));
+    }
+
+    @Test
     void theCameraRowsAreTheOnesARunCannotChangeUnderItself() {
         assertTrue(Hud.cameraRow(Plan.ROW_SILENT));
         assertTrue(Hud.cameraRow(Plan.ROW_DRIVE));

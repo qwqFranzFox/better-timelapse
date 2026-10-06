@@ -83,6 +83,30 @@ class PlanTest {
     }
 
     @Test
+    void seedingFromTheBodyMakesTheCameraTheBaseline() {
+        Plan p = new Plan();
+        assertFalse(p.silentShutter(), "the app's own default");
+
+        // What the body reported at open. Without this, applying the plan was a one-way switch: the app
+        // believed the body held its own default, so a setting it turned on could never be turned off.
+        p.seed(Plan.ROW_SILENT, 1);
+        p.seed(Plan.ROW_DRIVE, Plan.DRIVE_BRACKET3);
+
+        assertTrue(p.silentShutter(), "the plan now says what the camera holds");
+        assertEquals(Plan.DRIVE_BRACKET3, p.driveMode());
+        assertFalse(p.dirty(), "and nothing is pending, because nothing was edited");
+    }
+
+    @Test
+    void seedingIsClampedLikeEveryOtherWrite() {
+        Plan p = new Plan();
+        p.seed(Plan.ROW_SILENT, 42);
+        assertEquals(1, p.get(Plan.ROW_SILENT));
+        p.seed(Plan.ROW_DRIVE, 99);
+        assertEquals(Plan.DRIVE_COUNT - 1, p.get(Plan.ROW_DRIVE));
+    }
+
+    @Test
     void anEditIsDirtyUntilTheCameraHoldsIt() {
         Plan p = new Plan();
         assertFalse(p.dirty());

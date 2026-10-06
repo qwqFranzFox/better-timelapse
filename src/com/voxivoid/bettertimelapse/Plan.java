@@ -76,6 +76,20 @@ public final class Plan {
         wanted[row] = clamp(row, value);
     }
 
+    /**
+     * Take a value the camera reported as this row's baseline: wanted and stored alike.
+     *
+     * <p>{@code stored} is documented as "what the camera's settings store holds", and it used to be a
+     * copy of this app's own defaults — which made both the panel's 未存 marker and the exit rule into
+     * statements about nothing, and made applying the plan a one-way switch: a setting this app turned on
+     * could never be turned off, because the app believed the body already held its default. Seeding from
+     * the body at open is what makes "wanted ≠ stored" mean something.
+     */
+    public void seed(int row, int value) {
+        wanted[row] = clamp(row, value);
+        stored[row] = wanted[row];
+    }
+
     /** Whether this row differs from what the camera holds. */
     public boolean dirty(int row) {
         return wanted[row] != stored[row];

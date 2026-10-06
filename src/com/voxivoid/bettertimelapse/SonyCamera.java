@@ -233,6 +233,54 @@ public final class SonyCamera {
         }
     }
 
+    /**
+     * Whether a key is still physically down, straight from the camera, or {@code null} when it will not
+     * say.
+     *
+     * <p>Needed because a body can lose the key-release event: a short press then looks exactly like a
+     * hold, and on this app the difference between those two is a stopped run. {@code null} means "no
+     * answer", and the caller treats that as a hold — the worst case is a question, not a lost shoot.
+     */
+    public Boolean keyDown(int scan) {
+        try {
+            Class<?> input = Class.forName("com.sony.scalar.sysutil.ScalarInput");
+            Object status = input.getMethod("getKeyStatus", int.class).invoke(null, scan);
+            if (status == null) return null;
+            Object value = status.getClass().getField("status").get(status);
+            if (value instanceof Boolean) return (Boolean) value;
+            if (value instanceof Number) return ((Number) value).intValue() != 0;
+            return null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * What the body itself holds for the two rows this app can read back.
+     *
+     * <p>Used to seed the plan at open, so "wanted ≠ stored" and the exit rule are statements about the
+     * camera rather than about this app's defaults. {@code Frames.UNKNOWN} means the body would not say.
+     */
+    public int silentShutterHeld() {
+        String value = readKey("silent-shutter-mode");
+        if (value == null) return Frames.UNKNOWN;
+        String v = value.trim().toLowerCase(java.util.Locale.US);
+        if ("true".equals(v) || "on".equals(v) || "1".equals(v)) return 1;
+        if ("false".equals(v) || "off".equals(v) || "0".equals(v)) return 0;
+        return Frames.UNKNOWN;
+    }
+
+    /** The body's own drive mode as a {@code Plan.DRIVE_*}, or {@code Frames.UNKNOWN}. */
+    public int driveModeHeld() {
+        String value = readKey("drive-mode");
+        if (value == null) return Frames.UNKNOWN;
+        String v = value.trim().toLowerCase(java.util.Locale.US);
+        if (v.startsWith("single")) return Plan.DRIVE_SINGLE;
+        if (v.startsWith("burst")) return Plan.DRIVE_BURST;
+        if (v.startsWith("bracket")) return Plan.DRIVE_BRACKET3;
+        return Frames.UNKNOWN;
+    }
+
     /** Why the preview is not running, or empty. Without one, a capture is refused. */
     public String previewProblem() {
         return previewProblem;

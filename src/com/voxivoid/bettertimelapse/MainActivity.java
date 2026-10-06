@@ -84,6 +84,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** The user's own silent-shutter answer, while rehearsal is borrowing the row. */
     private int silentBeforeRehearsal;
 
+    /** Whether the user answered it themselves while rehearsal was on: their answer wins on the way out. */
+    private boolean silentChosenInRehearsal;
+
+    /** Whether a run was in progress when the app was switched away from. */
+    private boolean runInterrupted;
+
     /** When the current frame was handed to the camera, for the callback latency. */
     private long firedAtMs;
 
@@ -106,6 +112,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private String cardNewestPath = "";
     private long cardNewestBytes;
     private String cardRoots = "";
+    private String cardRoot = "";
 
     /** The count as of the previous walk: the difference between the two is what the card gained. */
     private int lastWalkCount = Frames.UNKNOWN;
@@ -194,8 +201,35 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         if (!started) {
             started = true;
             handler.postDelayed(onStartupFallback, 1500);
+        } else {
+            // Coming back into the foreground a second time: the camera was released on the way out.
+            handler.post(onReturn);
         }
     }
+
+    /**
+     * Back in front of the camera.
+     *
+     * <p>Nothing used to happen here, and two things were wrong because of it. A run that was in progress
+     * when the app was switched away from could not continue — the camera had been released, the shutter
+     * callback was gone and every timer had been cancelled — so the engine sat mid-frame with nothing
+     * driving it: a frozen countdown no key could move. It ends now, and says how much it got. And the
+     * camera has to be opened and registered again, or the next run shoots without a shutter callback and
+     * without a single setting pushed to the body.
+     */
+    private final Runnable onReturn = new Runnable() {
+        @Override
+        public void run() {
+            if (runInterrupted) {
+                runInterrupted = false;
+                int got = engine.landed();
+                engine.stop(Engine.FAULT_NONE, now());
+                panel.setEvidence("\u88ab\u6253\u65ad\uff1a\u5df2\u62cd " + got + " \u5f20");  // 被打断：已拍 N 张
+            }
+            if (!camera.isOpen()) openCamera();
+            panel.invalidate();
+        }
+    };
 
     /**
      * If the panel never reports a first draw, the slow work must still happen. It is better to open
@@ -224,6 +258,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         menu.reset();
         // The camera belongs to the camera when this app is not in front, and releasing it here is
         // also what makes the next open clean.
+        // Remembered for onReturn: the run cannot survive the camera being released, and a run that
+        // silently stops being driven is worse than one that ends and says so.
+        runInterrupted = engine.midRun();
         camera.clearShutterListener();
         camera.release();
         camera.close();
@@ -292,7 +329,24 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         }
         camera.setShutterListener(onShutter);
         panel.setCameraNote(camera.capabilities().summary(camera.previewing()));
+        seedPlanFromCamera();
         applyPlanToCamera();
+    }
+
+    /**
+     * Take the body's own answers as the plan's baseline before anything is pushed to it.
+     *
+     * <p>The rows this app can read back are the silent shutter and the drive mode; for those, "what the
+     * camera holds" was until now simply a copy of this app's defaults, which made the panel's 未存 marker
+     * and the exit rule meaningless and turned applying the plan into a one-way switch — a setting this app
+     * turned on could never be turned off, because the app believed the body already held its default
+     * (docs/PAIN-POINTS.md U-07, in a new place).
+     */
+    private void seedPlanFromCamera() {
+        int silent = camera.silentShutterHeld();
+        if (silent != Frames.UNKNOWN) engine.plan().seed(Plan.ROW_SILENT, silent);
+        int drive = camera.driveModeHeld();
+        if (drive != Frames.UNKNOWN) engine.plan().seed(Plan.ROW_DRIVE, drive);
     }
 
     /**
@@ -315,10 +369,18 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 : plan.driveMode() == Plan.DRIVE_BRACKET3 ? "bracket" : "single";
         if (!camera.setDriveMode(wanted)) failed.append("\u9a71\u52a8 ");                    // 驱动
 
-        boolean silentTook = !plan.silentShutter() || camera.setSilentShutter(true);
-        if (!silentTook) failed.append("\u9759\u97f3 ");                                     // 静音
+        // Both directions, every time. Sending only the "on" value left the body holding whatever the
+        // previous run had set while the row on screen said otherwise — the lie this project exists to
+        // avoid. The silent shutter is verifiable (setParameterKey reads the key back), so a failure is
+        // reported whichever way it was asked to go.
+        if (!camera.setSilentShutter(plan.silentShutter())) failed.append("\u9759\u97f3 ");     // 静音
 
-        if (plan.autoExposureLock() && !camera.setAutoExposureLock(true)) failed.append("AEL ");
+        // AEL is applied in both directions too, but only the "on" direction is reported: the modifier
+        // route cannot prove the off one, and a line that complains about a setting nobody asked for
+        // teaches its user to stop reading it.
+        if (!camera.setAutoExposureLock(plan.autoExposureLock()) && plan.autoExposureLock()) {
+            failed.append("AEL ");
+        }
 
         // What the body actually holds, read back after the writes above: the difference between "the
         // setting was applied" and "the setting was sent".
@@ -345,6 +407,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * the wheel, and the elapsed clock keeps the time already shot (docs/DECISIONS.md A19).
      */
     private void onPlanEdited(int row) {
+        if (row == Plan.ROW_SILENT && panel.isDryRun()) silentChosenInRehearsal = true;
         if (row == Plan.ROW_INTERVAL && engine.midRun()) {
             engine.schedule().rebase(now(), engine.plan());
             pump();                                     // re-arm for the new spacing
@@ -597,6 +660,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             cardNewestPath = card.newestPath();
             cardNewestBytes = card.newestBytes();
             cardRoots = card.rootsReport();
+            cardRoot = card.rootInUse();
 
             if (cardCount != Frames.UNKNOWN) sawCard = true;
             if (cardNewestBytes > 0) measuredFrameBytes = cardNewestBytes;
@@ -706,7 +770,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         if (perFrame <= 0) perFrame = cardNewestBytes;
         if (perFrame <= 0) perFrame = FALLBACK_FRAME_BYTES;
         panel.setDeviceStatus(Device.batteryPercent(this), Device.charging(this),
-                Device.freeBytes(), perFrame);
+                Device.freeBytes(cardRoot.length() == 0 ? null : cardRoot), perFrame);
     }
 
     private long now() {
@@ -867,9 +931,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // a lock: the row stays editable, and leaving rehearsal puts the user's own answer back.
             if (rehearsal) {
                 silentBeforeRehearsal = engine.plan().get(Plan.ROW_SILENT);
+                silentChosenInRehearsal = false;
                 engine.plan().set(Plan.ROW_SILENT, 1);
                 if (camera.isOpen()) camera.setSilentShutter(true);
-            } else {
+            } else if (!silentChosenInRehearsal) {
+                // Only put the old value back if the user did not answer the question themselves while
+                // rehearsal was on: silently undoing a setting the user just made is its own defect.
                 engine.plan().set(Plan.ROW_SILENT, silentBeforeRehearsal);
             }
             panel.setCameraNote(rehearsal
@@ -915,7 +982,16 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         @Override
         public void run() {
             if (trash.fire() != Keys.Hold.HOLD) return;
-            if (!engine.running()) return;
+            // A body that loses the release makes a short press look like a hold, and the difference here
+            // is a stopped run. The key itself is asked: still down means the hold was meant, and no answer
+            // means the same thing. A release that went missing means the press was short, and the short
+            // action is carried out now instead of the stop.
+            if (!Keys.trashHoldActs(camera.keyDown(Keys.K_DELETE))) {
+                panel.trash(now());
+                if (engine.state() == Engine.PAUSED) walkCard();
+                return;
+            }
+            if (!engine.midRun()) return;
             engine.stop(Engine.FAULT_ABORTED, now());
             handler.removeCallbacks(onTick);
             handler.removeCallbacks(onRelease);

@@ -135,15 +135,4 @@ public final class Frames {
         if (planned == Plan.FRAMES_UNLIMITED) return framesLeft >= MIN_FRAMES_TO_START;
         return framesLeft >= Math.min(planned, MIN_FRAMES_TO_START);
     }
-
-    /**
-     * The state of the run against the plan, as one of the three things the panel can say: the frames
-     * that landed, whether that matches the plan, and whether anything was lost on the way.
-     */
-    public static String verdict(int landed, int planned, int fired) {
-        int missing = fired - landed;
-        if (planned != Plan.FRAMES_UNLIMITED && landed >= planned) return "";
-        if (missing <= 0) return "";
-        return "\u5dee " + missing + " \u5f20";   // 差 N 张
-    }
 }

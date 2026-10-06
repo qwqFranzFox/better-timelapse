@@ -73,20 +73,6 @@ public final class Keys {
         }
     }
 
-    /**
-     * Keys whose press does one thing, once. A key-repeat of these is dropped, or holding TRASH
-     * would spin the panel through its visibility states faster than the user can see them.
-     * The four-way and the dials keep their repeat: held, they walk.
-     */
-    public static boolean oneShot(int scan) {
-        switch (scan) {
-            case K_ENTER: case K_MENU: case K_SK1: case K_DELETE: case K_SK2: case K_FN:
-                return true;
-            default:
-                return false;
-        }
-    }
-
     /** TRASH on the bodies that print it, or the second soft key that stands for it on NEX. */
     public static boolean isTrash(int scan) {
         return scan == K_DELETE || scan == K_SK2;
