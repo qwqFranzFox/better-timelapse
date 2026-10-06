@@ -311,7 +311,7 @@ public class MainActivity extends Activity {
         // The numbers this app is about to judge the frame by, kept on screen: "three frames were not
         // written" after one shutter press is a sentence that cannot be diagnosed without knowing what
         // the card count and the per-frame file count actually were.
-        panel.setEvidence("\u5361 " + (cardAtFire == Frames.UNKNOWN ? "?" : String.valueOf(cardAtFire))
+        panel.setNumbers("\u5361 " + (cardAtFire == Frames.UNKNOWN ? "?" : String.valueOf(cardAtFire))
                 + "  \u6bcf\u5e27 " + Frames.filesPerFrame(engine.plan()) + " \u6587\u4ef6"
                 + "  \u9a71\u52a8 " + Hud.driveName(engine.plan().driveMode()));
 
@@ -412,7 +412,7 @@ public class MainActivity extends Activity {
         // plan is expected to produce. "One press, three frames lost" is not diagnosable without them.
         card.refresh();
         int gained = Frames.arrived(cardAtFire, card.count());
-        panel.setEvidence("\u5361\u589e " + gained + " \u6587\u4ef6"
+        panel.setNumbers("\u5361\u589e " + gained + " \u6587\u4ef6"
                 + "  \u671f\u671b " + Frames.filesPerFrame(engine.plan())
                 + "  \u843d\u76d8 " + engine.landed()
                 + "  \u672a\u6838\u5b9e " + engine.unverified());

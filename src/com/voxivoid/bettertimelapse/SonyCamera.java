@@ -213,21 +213,85 @@ public final class SonyCamera {
     // ---------------------------------------------------------------- live parameters
     private Object createModifier() {
         modifierProblem = "";
+        if (camera == null) {
+            modifierProblem = "no camera";
+            return null;
+        }
+        // The names and signatures here come from the old app's build files, not from this body. A
+        // reflection lookup that fails says only "not that one", so the real signature list is kept
+        // and shown: guessing again is how silent shutter stayed broken for a round.
+        String[] names = { "createParametersModifier", "createParameterModifier", "getParametersModifier" };
+        for (int i = 0; i < names.length; i++) {
+            Object made = tryModifier(names[i], new Class<?>[] { android.hardware.Camera.Parameters.class },
+                    new Object[] { paramsOf() });
+            if (made != null) return made;
+        }
+        for (int i = 0; i < names.length; i++) {
+            Object made = tryModifier(names[i], new Class<?>[] { android.hardware.Camera.class },
+                    new Object[] { camera });
+            if (made != null) return made;
+        }
+        for (int i = 0; i < names.length; i++) {
+            Object made = tryModifier(names[i], new Class<?>[0], new Object[0]);
+            if (made != null) return made;
+        }
+        // Nothing worked. Record what the class actually offers, so the next round is not a guess.
+        modifierProblem = "no factory matched; CameraEx methods: " + cameraExMethods();
+        return null;
+    }
+
+    private android.hardware.Camera.Parameters paramsOf() {
         try {
-            android.hardware.Camera.Parameters params = camera.getParameters();
-            Object created = cameraEx.getClass()
-                    .getMethod("createParametersModifier", android.hardware.Camera.Parameters.class)
-                    .invoke(cameraEx, params);
-            if (created == null) {
-                modifierProblem = "createParametersModifier returned null";
-                return null;
-            }
-            return created;
+            return camera.getParameters();
         } catch (Throwable t) {
-            modifierProblem = shortName(t);
             return null;
         }
     }
+
+    private Object tryModifier(String name, Class<?>[] types, Object[] args) {
+        try {
+            Object made = cameraEx.getClass().getMethod(name, types).invoke(cameraEx, args);
+            if (made == null) {
+                modifierProblem = name + " returned null";
+                return null;
+            }
+            return made;
+        } catch (Throwable t) {
+            return null;   // try the next shape
+        }
+    }
+
+    /**
+     * Every method the body's CameraEx actually declares, in order, so a missing call can be replaced
+     * by the one that exists instead of by another guess.
+     */
+    public String cameraExMethods() {
+        if (cameraEx == null) return "(no camera)";
+        StringBuilder b = new StringBuilder();
+        try {
+            java.lang.reflect.Method[] methods = cameraEx.getClass().getMethods();
+            java.util.Arrays.sort(methods, new java.util.Comparator<java.lang.reflect.Method>() {
+                @Override
+                public int compare(java.lang.reflect.Method a, java.lang.reflect.Method c) {
+                    return a.getName().compareTo(c.getName());
+                }
+            });
+            for (java.lang.reflect.Method m : methods) {
+                if (m.getDeclaringClass() == Object.class) continue;
+                b.append(m.getName()).append('(');
+                Class<?>[] p = m.getParameterTypes();
+                for (int i = 0; i < p.length; i++) {
+                    if (i > 0) b.append(',');
+                    b.append(p[i].getSimpleName());
+                }
+                b.append(") ");
+            }
+        } catch (Throwable t) {
+            b.append("(listing failed: ").append(shortName(t)).append(')');
+        }
+        return b.toString();
+    }
+
 
     /** Why the parameter modifier is unavailable; empty when it is. */
     public String modifierProblem() {

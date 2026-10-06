@@ -67,6 +67,7 @@ public final class PanelView extends View {
      */
     private String fontError = "";
     private String evidence = "";
+    private String numbers = "";
 
     /** Called once, the first time a frame is actually drawn. */
     private Runnable onFirstDraw;
@@ -208,8 +209,20 @@ public final class PanelView extends View {
      * while the settings row said it was applied. Evidence that scrolls away is not evidence.
      */
     public void setEvidence(String message) {
-        if (evidence.length() > 0) return;      // the first one is the interesting one
+        if (evidence.length() > 0) return;      // the first failure is the interesting one
         evidence = message == null ? "" : message;
+        invalidate();
+    }
+
+    /**
+     * The numbers behind the last verdict, refreshed on every frame.
+     *
+     * <p>Deliberately a second line. The first version of this reused the evidence line, which only
+     * ever holds its first message — so the moment the modifier failed, every later number was
+     * discarded and the user could not see what the app was judging frames by.
+     */
+    public void setNumbers(String message) {
+        numbers = message == null ? "" : message;
         invalidate();
     }
 
@@ -496,11 +509,16 @@ public final class PanelView extends View {
             canvas.drawText(clip(fontError, w - padding * 2f), padding, y - lineHeight, paint);
             paint.setColor(colDim);
         }
+        float lines = fontError.length() > 0 ? 2f : 1f;
         if (evidence.length() > 0) {
             paint.setColor(colWarn);
-            float at = y - lineHeight * (fontError.length() > 0 ? 2f : 1f);
-            canvas.drawText(clip(evidence, w - padding * 2f), padding, at, paint);
+            canvas.drawText(clip(evidence, w - padding * 2f), padding, y - lineHeight * lines, paint);
             paint.setColor(colDim);
+            lines += 1f;
+        }
+        if (numbers.length() > 0) {
+            paint.setColor(colDim);
+            canvas.drawText(clip(numbers, w - padding * 2f), padding, y - lineHeight * lines, paint);
         }
 
         // Two markers share this row, so they are laid out from the right edge inwards rather than
