@@ -71,6 +71,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private final Keys.Hold centre = new Keys.Hold();
     private final Keys.Hold menu = new Keys.Hold();
     private final Keys.Hold down = new Keys.Hold();
+    private final Keys.Hold up = new Keys.Hold();
     private final SonyCamera camera = new SonyCamera();
     private final Card card = new Card();
 
@@ -167,6 +168,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         root.addView(panel, new android.widget.FrameLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        panel.setPlanListener(new PanelView.PlanListener() {
+            @Override
+            public void planEdited(int row) {
+                onPlanEdited(row);
+            }
+        });
         setContentView(root);
         if (pendingFontError.length() > 0) {
             panel.setFontNote("\u5b57\u4f53\u672a\u52a0\u8f7d");                            // 字体未加载
@@ -326,6 +333,22 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                     + camera.modifierMethods().length() + " \u4e2a\u53ef\u7528\u65b9\u6cd5\uff09");  // 个可用方法
         }
         panel.setCameraNote(camera.capabilities().summary(camera.previewing()));
+    }
+
+    /**
+     * A row changed on the panel.
+     *
+     * <p>The interval is the one edit that has to be handled rather than stored. The timetable is
+     * absolute — frame n is due at {@code start + n × interval} — so re-gridding every frame still to
+     * come from a value the user just turned would move the next frame by minutes, not by one detent.
+     * Rebasing puts the grid back on "now" with the new spacing, which is what the user meant by turning
+     * the wheel, and the elapsed clock keeps the time already shot (docs/DECISIONS.md A19).
+     */
+    private void onPlanEdited(int row) {
+        if (row == Plan.ROW_INTERVAL && engine.midRun()) {
+            engine.schedule().rebase(now(), engine.plan());
+            pump();                                     // re-arm for the new spacing
+        }
     }
 
     // ================================================================ the preview surface
@@ -716,7 +739,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 panel.turn(-1);
                 return true;
             case Keys.K_UP:
-                panel.move(-1);
+                if (up.down(repeat) == Keys.Hold.ARM) handler.postDelayed(onUpHold, Keys.HOLD_MS);
+                if (repeat == 0) panel.move(-1);
                 return true;
             case Keys.K_DOWN:
                 // Held, the down key switches the rehearsal mode on and off. The zoom lever was bound to
@@ -767,6 +791,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         if (Keys.swallowed(scan)) return true;
 
         switch (scan) {
+            case Keys.K_UP:
+                handler.removeCallbacks(onUpHold);
+                up.up();
+                return true;
             case Keys.K_DOWN:
                 handler.removeCallbacks(onDownHold);
                 down.up();
@@ -833,6 +861,22 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                     ? "\u6f14\u7ec3\u6a21\u5f0f\uff1a\u4e0d\u52a8\u76f8\u673a\u3001\u9759\u97f3\u5feb\u95e8\u5f00"  // 演练模式：不动相机、静音快门开
                     : "\u6f14\u7ec3\u6a21\u5f0f\u5df2\u5173");                                     // 演练模式已关
             panel.invalidate();
+        }
+    };
+
+    /**
+     * Up held: how much of the panel is on screen.
+     *
+     * <p>Full, then one line, then nothing but the legend. The panel has drawn all three modes since it
+     * was written and no key could reach two of them: a long exposure does not want a lit screen in front
+     * of it, and the mode that fixes that was unreachable code. Unlike the rehearsal switch, this one
+     * works during a run — that is when it is wanted.
+     */
+    private final Runnable onUpHold = new Runnable() {
+        @Override
+        public void run() {
+            if (up.fire() != Keys.Hold.HOLD) return;
+            panel.cyclePanel();
         }
     };
 

@@ -113,9 +113,7 @@ public final class PanelView extends View {
      */
     public void turn(int direction) {
         if (panelMode == PANEL_HIDDEN) panelMode = PANEL_FULL;
-        Plan plan = engine.plan();
-        plan.set(row, Steps.apply(row, plan.get(row), true, direction));
-        invalidate();
+        edit(true, direction);
     }
 
     /** Up and down move between rows, as they do in Recipe Lab. */
@@ -126,9 +124,38 @@ public final class PanelView extends View {
 
     /** Left and right, deliberate presses, carry the big jumps. */
     public void adjust(int direction) {
+        edit(false, direction);
+    }
+
+    /**
+     * One edit, and the two rules that decide whether it is allowed.
+     *
+     * <p>A camera-side row is refused while a run is on screen, because it cannot take effect until the
+     * next one starts; the row says why instead of moving. Every other row is a number the timetable
+     * uses, and changing it mid-run is meant to work — the shell rebases the run so the new value applies
+     * from the next frame rather than retroactively moving every frame after it.
+     */
+    private void edit(boolean wheel, int direction) {
+        if (engine.midRun() && Hud.cameraRow(row)) {
+            invalidate();
+            return;
+        }
         Plan plan = engine.plan();
-        plan.set(row, Steps.apply(row, plan.get(row), false, direction));
+        int before = plan.get(row);
+        plan.set(row, Steps.apply(row, before, wheel, direction));
+        if (plan.get(row) != before && planListener != null) planListener.planEdited(row);
         invalidate();
+    }
+
+    /** Told when a row actually changed, so the shell can make the change take effect. */
+    public interface PlanListener {
+        void planEdited(int row);
+    }
+
+    private PlanListener planListener;
+
+    public void setPlanListener(PlanListener listener) {
+        planListener = listener;
     }
 
     /** TRASH: cycle how much of the panel is on screen. */
@@ -449,7 +476,8 @@ public final class PanelView extends View {
             paint.setColor(engine.plan().dirty(i) ? colAccent : colText);
             canvas.drawText(value, padding * 2.2f + nameWidth, baseline, paint);
 
-            String detail = Hud.rowDetail(engine.plan(), i);
+            String detail = Hud.rowDetail(engine.plan(), i,
+                    engine.midRun() && Hud.cameraRow(i));
             String hint = detail.length() > 0 ? detail : Steps.hint(i, engine.plan().get(i));
             float hintX = w - padding - hintWidth;
             if (hintX > padding * 2.2f + nameWidth + w * 0.20f) {

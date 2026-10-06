@@ -98,6 +98,23 @@ public final class Frames {
     private static final long PRESS_FLOOR_MS = 600;
 
     /**
+     * Whether a frame whose moment has already passed is still worth taking.
+     *
+     * <p>A frame can only start if its release fits before the next frame's moment, so the run may start
+     * one <em>slack</em> late and no later: {@code interval - pressWindow}. Past that, taking the frame
+     * would put it on top of the next one and drag the rest of the run with it — which is precisely the
+     * old app's silent catch-up shooting (docs/PAIN-POINTS.md U-18). A moment that cannot be used is
+     * dropped and counted instead, and the frame after it is still taken where it was always due.
+     *
+     * <p>The slack is smallest exactly when the interval is short: at 2 s on this body it is 400 ms, so
+     * a shell held up by half a second loses that moment rather than the whole sequence's phase.
+     */
+    public static boolean stillFits(Plan plan, long remainingMs) {
+        if (remainingMs > 0) return true;
+        return -remainingMs <= plan.intervalMs() - pressWindowMs(plan);
+    }
+
+    /**
      * Frames the card can still take, from the free space and a measured frame size. A floor, and
      * deliberately so: an estimate that runs out early costs a re-shoot, one that runs out late costs
      * the pictures.

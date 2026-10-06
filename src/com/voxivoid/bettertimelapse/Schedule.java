@@ -127,9 +127,14 @@ public final class Schedule {
      */
     public void rebase(long nowMs, Plan plan) {
         if (!armed()) return;
-        startMs = nowMs - plan.delayMs() - (long) frameIndex * plan.intervalMs();
+        long rebasedStart = nowMs - plan.delayMs() - (long) frameIndex * plan.intervalMs();
+        // The clock the user watches must not jump backwards when a run is rebased: "已用" is time this
+        // run has spent running, and moving the timetable's origin does not give any of it back. Setting
+        // pausedForMs to zero here did exactly that — a five-minute pause and resume put the elapsed
+        // clock back to a few seconds, which reads as the app having lost the run.
+        pausedForMs += startMs - rebasedStart;
+        startMs = rebasedStart;
         resumeMs = NONE;
-        pausedForMs = 0;
     }
 
     /** Mark the run as over: no frame is due again. */

@@ -113,9 +113,29 @@ public final class Hud {
      * worth what" becomes readable before the wheel is touched (U-08).
      */
     public static String rowDetail(Plan plan, int row) {
+        return rowDetail(plan, row, false);
+    }
+
+    /**
+     * The same, for a row the run has locked.
+     *
+     * <p>A camera-side row takes effect when a run starts, so editing one mid-run would leave the panel
+     * showing a setting the body does not hold. The row says so instead of accepting the edit: a number
+     * the user cannot trust is worse than a key that does nothing.
+     */
+    public static String rowDetail(Plan plan, int row, boolean locked) {
+        if (locked && cameraRow(row)) {
+            return "\u8fd0\u884c\u4e2d\u4e0d\u6539\u673a\u8eab\u8bbe\u7f6e";   // 运行中不改机身设置
+        }
         switch (row) {
             case Plan.ROW_PANEL_OFF:
-                return "\u6bcf\u5f20\u4e4b\u540e\u5173\u5c4f";        // 每张之后关屏
+                // The row exists, the setting is stored, and nothing acts on it yet. Saying "每张之后关屏"
+                // on a row that does not switch anything off is the same kind of lie as the old app's
+                // settings that were sent and never applied (U-07): the screen is where a user finds out,
+                // and it has to be right whether the feature is finished or not.
+                return plan.panelOff()
+                        ? "\u6bcf\u5f20\u4e4b\u540e\u5173\u5c4f\uff08\u5c1a\u672a\u5b9e\u73b0\uff09"  // 每张之后关屏（尚未实现）
+                        : "\u5c4f\u5e55\u4e00\u76f4\u4eae\u7740";                                      // 屏幕一直亮着
             case Plan.ROW_SILENT:
                 return plan.silentShutter()
                         ? "\u672c\u673a\u8eab\u5df2\u62a5\u544a\u652f\u6301"   // 本机身已报告支持
@@ -127,6 +147,14 @@ public final class Hud {
             default:
                 return "";
         }
+    }
+
+    /**
+     * Rows that are pushed to the camera when a run starts, and therefore cannot mean anything new until
+     * the next one: the silent shutter, the drive mode and the exposure lock.
+     */
+    public static boolean cameraRow(int row) {
+        return row == Plan.ROW_SILENT || row == Plan.ROW_DRIVE || row == Plan.ROW_AEL;
     }
 
     // ---------------------------------------------------------------- the status bar
@@ -291,6 +319,7 @@ public final class Hud {
                 + "\u2191\u2193 \u6362\u884c   "                  // ↑↓ 换行
                 + "\u4e2d\u5fc3 \u5f00\u59cb   "                  // 中心 开始
                 + "TRASH \u6682\u505c   "                        // TRASH 暂停
+                + "\u957f\u6309\u2191 \u5c4f\u663e   "                // 长按↑ 屏显
                 + "\u957f\u6309\u2193 \u6f14\u7ec3";                  // 长按↓ 演练
     }
 

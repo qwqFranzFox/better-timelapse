@@ -127,6 +127,18 @@ public final class Engine {
         return state == ARMED || state == WAITING || state == EXPOSING;
     }
 
+    /**
+     * Whether a run is on screen, paused or not.
+     *
+     * <p>Different from {@link #running()} on purpose: TRASH has to be able to resume a paused run, so
+     * {@code running()} must stay false while paused. But a paused run still owns the camera and its plan,
+     * and a row edited then would show a value the body does not hold — the old app's "sent, never
+     * applied" lie (docs/PAIN-POINTS.md U-07) in a new place.
+     */
+    public boolean midRun() {
+        return running() || state == PAUSED;
+    }
+
     /** Frames handed to the camera. Compared against {@link #landed()} this is the honest count. */
     public int fired() {
         return fired;
@@ -280,13 +292,12 @@ public final class Engine {
             return ACT_NONE;
         }
         if (remaining > 0) return ACT_ARM_TIMER;
-        if (remaining <= -plan.intervalMs()) {
-            // A whole interval late: this moment is gone. Skipping keeps the next frames on the grid
-            // they were announced on, rather than sliding the rest of the run behind a camera that
-            // could not keep up.
+        if (!Frames.stillFits(plan, remaining)) {
+            // Too late to start this frame and still release before the next one. The moment is dropped,
+            // and the frame after it is taken where it was always due, rather than sliding the rest of
+            // the run behind a camera that could not keep up.
             skipped++;
-            schedule.advance();
-            return ACT_ARM_TIMER;
+            return advanceMoment();
         }
         state = EXPOSING;
         fired++;
@@ -316,11 +327,30 @@ public final class Engine {
         landed++;
         consecutiveFailures = 0;
         if (landed < MAX_SHOTS) shotTimesMs[landed - 1] = nowMs;
-        schedule.advance();
         attemptsForCurrentFrame = 0;
         state = WAITING;
 
+        int action = advanceMoment();
         if (plan.frames() != Plan.FRAMES_UNLIMITED && landed >= plan.frames()) {
+            state = DONE;
+            schedule.finish();
+            return ACT_NONE;
+        }
+        return action;
+    }
+
+    /**
+     * Move to the next moment, and end the run when that was the last one.
+     *
+     * <p>Every path that gives up on a frame — lost, refused, skipped — moves the timetable on without
+     * taking a picture, and none of them used to notice that it had just gone past the final moment: the
+     * run stayed in WAITING with no timer behind it, nothing changing on screen and nothing to press.
+     * Five tests in {@code EngineTest} covered the happy paths and none of them covered this one; a
+     * stuck camera screen is worse than a finished run.
+     */
+    private int advanceMoment() {
+        schedule.advance();
+        if (schedule.nextDueMs(plan) == Schedule.NONE) {
             state = DONE;
             schedule.finish();
             return ACT_NONE;
@@ -369,10 +399,9 @@ public final class Engine {
             schedule.finish();
             return ACT_NONE;
         }
-        schedule.advance();
         attemptsForCurrentFrame = 0;
         state = WAITING;
-        return ACT_ARM_TIMER;
+        return advanceMoment();
     }
 
     /**
@@ -393,10 +422,9 @@ public final class Engine {
             schedule.finish();
             return ACT_NONE;
         }
-        schedule.advance();
         attemptsForCurrentFrame = 0;
         state = WAITING;
-        return ACT_ARM_TIMER;
+        return advanceMoment();
     }
 
     /** Why the last frame was judged lost, in the words of whatever reported it. */
