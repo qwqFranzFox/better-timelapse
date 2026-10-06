@@ -71,6 +71,14 @@ public class MainActivity extends Activity {
 
     private long measuredFrameBytes;
 
+    /**
+     * When {@code onCreate} started, and whether the first frame has been drawn yet. The gap between
+     * them is the black window the user sees, and it is measured rather than guessed: "the screen is
+     * black for a while" is not something to fix by intuition when the fix is a reordering.
+     */
+    private long begunAtMs;
+    private boolean firstFrameDrawn;
+
     // ================================================================ lifecycle
 
     @Override
@@ -84,30 +92,44 @@ public class MainActivity extends Activity {
                 color(R.color.background), color(R.color.text), color(R.color.dim),
                 color(R.color.selected), color(R.color.accent), color(R.color.warn),
                 color(R.color.good));
+        panel.setOnFirstDraw(new Runnable() {
+            @Override
+            public void run() {
+                onFirstFrame();
+            }
+        });
         setContentView(panel);
-        // A font that did not load means boxes on screen. Saying so beats a silent catch: it is the
-        // difference between "the app cannot draw Chinese" and "the app is broken".
-        // Which font route worked, or why none did. One short line that separates "the app cannot
-        // draw Chinese" from "the app is broken", and costs nothing when all is well.
-        if (UiFont.route().length() == 0) {
-            panel.setCameraNote("\u5b57\u4f53\u672a\u52a0\u8f7d\uff1a" + UiFont.report()   // 字体未加载
-                    + "  " + UiFont.assetListing(this));
-        } else {
-            panel.setFontNote("\u5b57\u4f53 " + UiFont.route());                                // 字体 <路径>
-        }
+        // Nothing about the font is decided here: it has not been loaded yet. Reading UiFont state at
+        // this point reported "not loaded" on the first frame and left that message up for good, even
+        // after the font arrived — a stale note that outlived its own cause.
+        begunAtMs = now();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         handler.post(onDevice);
+        // The startup work is queued by onFirstFrame, not here: queueing it from onResume meant it ran
+        // before anything had been drawn, which is the black window itself. A fallback covers the case
+        // where the first draw never reports back.
         if (!started) {
             started = true;
-            // Behind the first draw: the panel appears immediately, then the camera is opened and the
-            // card is read. Neither is needed to draw, and both can take seconds.
-            panel.post(onStartup);
+            handler.postDelayed(onStartupFallback, 1500);
         }
     }
+
+    /**
+     * If the panel never reports a first draw, the slow work must still happen. It is better to open
+     * the camera behind a black screen than never to open it at all.
+     */
+    private final Runnable onStartupFallback = new Runnable() {
+        @Override
+        public void run() {
+            if (firstFrameDrawn) return;
+            firstFrameDrawn = true;
+            handler.post(onStartup);
+        }
+    };
 
     @Override
     protected void onPause() {
@@ -125,6 +147,17 @@ public class MainActivity extends Activity {
         camera.cancel();
         camera.close();
         super.onPause();
+    }
+
+    /**
+     * The first frame is on screen. Everything slow is queued from here, and the delay it took is
+     * shown once, so a slow start is a number instead of a feeling.
+     */
+    private void onFirstFrame() {
+        if (firstFrameDrawn) return;
+        firstFrameDrawn = true;
+        panel.setStartupMs(now() - begunAtMs);
+        handler.post(onStartup);
     }
 
     /** Everything that costs time, queued behind the first frame. */

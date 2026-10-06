@@ -66,6 +66,13 @@ public final class PanelView extends View {
      * rounds of "boxes on screen" stayed invisible.
      */
     private String fontError = "";
+
+    /** Called once, the first time a frame is actually drawn. */
+    private Runnable onFirstDraw;
+    private boolean drewOnce;
+
+    /** How long the app took to draw its first frame, or 0 before it has. */
+    private long startupMs;
     private int batteryPercent = -1;
     private boolean charging;
     private long cardFreeBytes = -1;
@@ -181,6 +188,17 @@ public final class PanelView extends View {
         invalidate();
     }
 
+    /** Told once, when the first frame has been drawn. */
+    public void setOnFirstDraw(Runnable callback) {
+        onFirstDraw = callback;
+    }
+
+    /** How long the first frame took, shown small on the legend row. */
+    public void setStartupMs(long ms) {
+        startupMs = ms;
+        invalidate();
+    }
+
     /** A font failure, drawn on its own line. Empty means the font is fine. */
     public void setFontError(String message) {
         fontError = message == null ? "" : message;
@@ -262,6 +280,12 @@ public final class PanelView extends View {
         float w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
         layout(w, h);
+
+        // Tell the shell once, so the slow work can be queued behind a frame that exists.
+        if (!drewOnce) {
+            drewOnce = true;
+            if (onFirstDraw != null) onFirstDraw.run();
+        }
 
         float y = padding;
 
@@ -474,13 +498,15 @@ public final class PanelView extends View {
             cursor -= padding * 2f;
         }
 
-        // Which route the bundled font was loaded by. Small, dim, and the only way to tell from a
-        // photograph of the screen whether the font is in use at all.
-        if (fontNote.length() > 0) {
-            float width = paint.measureText(fontNote);
+        // Which route the bundled font was loaded by, and how long the first frame took. Small, dim,
+        // and the only way to tell either from a photograph of the screen.
+        String note = fontNote;
+        if (startupMs > 0) note = note + "  " + startupMs + "ms";
+        if (note.length() > 0) {
+            float width = paint.measureText(note);
             if (cursor - width > padding) {
                 paint.setColor(colDim);
-                canvas.drawText(fontNote, cursor - width, y, paint);
+                canvas.drawText(note, cursor - width, y, paint);
             }
         }
     }
