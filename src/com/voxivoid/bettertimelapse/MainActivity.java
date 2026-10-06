@@ -79,16 +79,22 @@ public class MainActivity extends Activity {
     private long begunAtMs;
     private boolean firstFrameDrawn;
 
+    /** A font failure found before the panel existed; shown as soon as there is one. */
+    private String pendingFontError = "";
+
     // ================================================================ lifecycle
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         engine = new Engine(new Plan());
-        // No font yet: the panel draws its first frame with whatever the camera has, so a font that
-        // is slow, rejected or absent can never hold the screen black. The bundled font is loaded on
-        // its own turn, right after that first frame, and the panel redraws when it arrives.
-        panel = new PanelView(this, engine, null,
+        // The font is loaded here, before the first frame, so the first frame is already the finished
+        // thing. Drawing first and swapping the typeface in later meant every Chinese label appeared
+        // as a box for a moment and then changed — worse than a few milliseconds of black, and quite
+        // unnecessary: reading a 57 KB asset is not the slow part of starting up. The slow parts
+        // (opening the camera, walking the card) still wait for the first frame.
+        Typeface face = loadFont();
+        panel = new PanelView(this, engine, face,
                 color(R.color.background), color(R.color.text), color(R.color.dim),
                 color(R.color.selected), color(R.color.accent), color(R.color.warn),
                 color(R.color.good));
@@ -99,9 +105,12 @@ public class MainActivity extends Activity {
             }
         });
         setContentView(panel);
-        // Nothing about the font is decided here: it has not been loaded yet. Reading UiFont state at
-        // this point reported "not loaded" on the first frame and left that message up for good, even
-        // after the font arrived — a stale note that outlived its own cause.
+        if (pendingFontError.length() > 0) {
+            panel.setFontNote("\u5b57\u4f53\u672a\u52a0\u8f7d");                            // 字体未加载
+            panel.setFontError(pendingFontError);
+        } else {
+            panel.setFontNote("\u5b57\u4f53 " + UiFont.route());                                // 字体 <路径>
+        }
         begunAtMs = now();
     }
 
@@ -164,7 +173,6 @@ public class MainActivity extends Activity {
     private final Runnable onStartup = new Runnable() {
         @Override
         public void run() {
-            loadFont();
             openCamera();
             handler.post(onFirstCardRead);
         }
@@ -177,18 +185,15 @@ public class MainActivity extends Activity {
      * the screen black. The panel has already drawn by the time this runs, and it redraws with the new
      * typeface when one arrives.
      */
-    private void loadFont() {
+    private Typeface loadFont() {
         Typeface face = UiFont.load(this);
-        if (face != null) {
-            panel.setTypeface(face);
-            panel.setFontNote("\u5b57\u4f53 " + UiFont.route());                                // 字体 <路径>
-        } else {
+        if (face == null) {
             // Boxes on screen, and the reason on screen with them. A silent catch here is what made
-            // this unfixable from a photograph for two rounds.
-            panel.setFontNote("\u5b57\u4f53\u672a\u52a0\u8f7d");                            // 字体未加载
-            // Its own line, so nothing overwrites the reason.
-            panel.setFontError(UiFont.report() + "  " + UiFont.assetListing(this));
+            // this unfixable from a photograph for two rounds. The reason waits for the panel to
+            // exist, so it is stashed and applied once onCreate has built one.
+            pendingFontError = UiFont.report() + "  " + UiFont.assetListing(this);
         }
+        return face;
     }
 
     private final Runnable onFirstCardRead = new Runnable() {
