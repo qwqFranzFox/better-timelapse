@@ -68,6 +68,7 @@ public final class PanelView extends View {
     private String fontError = "";
     private String evidence = "";
     private String numbers = "";
+    private String roots = "";
 
     /** Called once, the first time a frame is actually drawn. */
     private Runnable onFirstDraw;
@@ -223,6 +224,16 @@ public final class PanelView extends View {
      */
     public void setNumbers(String message) {
         numbers = message == null ? "" : message;
+        invalidate();
+    }
+
+    /**
+     * Where the app can see the camera's files, and how many are under each root it found. On a body
+     * whose files live somewhere other than where this app may write, this line is the only way to
+     * find that out from the camera itself.
+     */
+    public void setRoots(String message) {
+        roots = message == null ? "" : message;
         invalidate();
     }
 
@@ -520,7 +531,11 @@ public final class PanelView extends View {
         }
         if (numbers.length() > 0) {
             paint.setColor(colDim);
-            wrap(canvas, numbers, padding, y - lineHeight * lines, wrapWidth, 2);
+            lines += wrap(canvas, numbers, padding, y - lineHeight * lines, wrapWidth, 2);
+        }
+        if (roots.length() > 0) {
+            paint.setColor(colDim);
+            wrap(canvas, roots, padding, y - lineHeight * lines, wrapWidth, 2);
         }
 
         // Two markers share this row, so they are laid out from the right edge inwards rather than

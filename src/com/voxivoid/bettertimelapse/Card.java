@@ -3,6 +3,8 @@ package com.voxivoid.bettertimelapse;
 import android.os.Environment;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Arrays;
 import java.util.Comparator;
 
@@ -26,6 +28,23 @@ public final class Card {
     /** The camera's own tree. Subdirectories are per-card and per-roll, so the walk is recursive. */
     private static final String DCIM = "DCIM";
 
+    /**
+     * Where the camera might keep its files.
+     *
+     * <p>{@code Environment.getExternalStorageDirectory()} answers where <em>this app</em> may write,
+     * which on a camera is not necessarily where the camera writes. On this body the free-space figure
+     * is readable while the DCIM tree apparently is not, which is only possible if the two are
+     * different places. So every plausible root is checked and the first one holding images wins.
+     */
+    private static final String[] ROOTS = {
+            null,                       // Environment.getExternalStorageDirectory()
+            "/mnt/sdcard",
+            "/storage/sdcard0",
+            "/sdcard",
+            "/mnt/ext_card",
+            "/storage/sdcard1",
+    };
+
     private static final String[] IMAGE_SUFFIXES = { ".jpg", ".jpeg", ".arw", ".png" };
 
     /** Extension of the newest image found, so the panel can say what is being written. */
@@ -39,12 +58,60 @@ public final class Card {
      * Read the card. Call it before a run and again after each frame; it is a directory walk, not a
      * camera call, so it works while the camera is busy.
      */
+    /** The root that last produced images, or {@code null} when none has. */
+    private String rootInUse;
+
+    /** Every root that exists, and how many images each holds. For the diagnostic line. */
+    public String rootsReport() {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < ROOTS.length; i++) {
+            File root = root(i);
+            if (root == null) continue;
+            File dcim = new File(root, DCIM);
+            if (!dcim.exists()) continue;
+            if (b.length() > 0) b.append(' ');
+            b.append(root.getPath()).append('=').append(countImages(dcim));
+        }
+        return b.length() == 0 ? "no DCIM under any known root" : b.toString();
+    }
+
+    private static File root(int i) {
+        if (ROOTS[i] == null) {
+            try {
+                return Environment.getExternalStorageDirectory();
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+        return new File(ROOTS[i]);
+    }
+
+    /** The root the images were found under; empty when none. */
+    public String rootInUse() {
+        return rootInUse == null ? "" : rootInUse;
+    }
+
     public void refresh() {
-        File dcim = new File(Environment.getExternalStorageDirectory(), DCIM);
-        if (!dcim.isDirectory()) {
-            // No DCIM directory is not the same as an empty one: the card may be absent, and the
-            // difference decides whether a missing frame is a card problem or a shutter problem.
-            readable = dcim.exists();
+        // Prefer the root that worked last time; otherwise look in all of them.
+        File dcim = rootInUse == null ? null : new File(new File(rootInUse), DCIM);
+        if (dcim == null || !dcim.isDirectory()) {
+            dcim = null;
+            rootInUse = null;
+            for (int i = 0; i < ROOTS.length; i++) {
+                File root = root(i);
+                if (root == null) continue;
+                File candidate = new File(root, DCIM);
+                if (candidate.isDirectory()) {
+                    dcim = candidate;
+                    rootInUse = root.getPath();
+                    break;
+                }
+            }
+        }
+        if (dcim == null) {
+            // Nothing readable anywhere: this app cannot see the camera's files at all, which is a
+            // different thing from a card that is empty or absent.
+            readable = false;
             count = Frames.UNKNOWN;
             newestName = "";
             newestStamp = 0;
@@ -112,6 +179,18 @@ public final class Card {
     /** Free bytes on the card, from the platform. */
     public static long freeBytes() {
         return Device.freeBytes();
+    }
+
+    /** Images under a directory tree, for the root report. */
+    private static int countImages(File dir) {
+        int n = 0;
+        File[] files = dir.listFiles();
+        if (files == null) return 0;
+        for (int i = 0; i < files.length; i++) {
+            if (files[i].isDirectory()) n += countImages(files[i]);
+            else if (isImage(files[i].getName())) n++;
+        }
+        return n;
     }
 
     private static boolean isImage(String name) {

@@ -201,6 +201,9 @@ public class MainActivity extends Activity {
         public void run() {
             card.refresh();
             pushDeviceStatus();
+            // Which roots hold the camera's files, and how many each holds. Read once, kept on screen:
+            // "the app cannot see the card" is a statement that needs the list behind it.
+            panel.setRoots("\u5361\u6839 " + card.rootsReport());                              // 卡根
         }
     };
 
@@ -363,11 +366,13 @@ public class MainActivity extends Activity {
                 settleFrame(true);
                 return;
             }
-            if (!card.readable() && cardAtFire != Frames.UNKNOWN) {
-                // It was readable when the frame was fired and is not now: a card fault, not a slow
-                // write, so retrying cannot help.
-                engine.stop(Engine.FAULT_CARD, now());
+            if (cardAtFire == Frames.UNKNOWN || !card.readable()) {
+                // The app cannot see the camera's files at all, so it has no evidence either way. That
+                // is not a reason to fail the run: the frame counts as taken and unconfirmed, which is
+                // what it is. Failing here told the user nothing except that the app gave up.
+                engine.step(Engine.EV_UNVERIFIED, now());
                 panel.invalidate();
+                pump();
                 return;
             }
             if (now() - firedAtMs >= LAND_TIMEOUT_MS) {
@@ -417,6 +422,7 @@ public class MainActivity extends Activity {
         // Raw numbers, not a verdict: how many files the card gained against what one frame of this
         // plan is expected to produce. "One press, three frames lost" is not diagnosable without them.
         card.refresh();
+        panel.setRoots("\u5361\u6839 " + card.rootsReport());                                  // 卡根
         int gained = Frames.arrived(cardAtFire, card.count());
         panel.setNumbers("\u5361\u589e " + gained + " \u6587\u4ef6"
                 + "  \u671f\u671b " + Frames.filesPerFrame(engine.plan())
