@@ -220,16 +220,38 @@ public class MainActivity extends Activity {
         applyPlanToCamera();
     }
 
-    /** Push the plan's camera-side options. Each may fail, and each failure is said out loud. */
+    /**
+     * Push the plan's camera-side options, and name every one that did not take.
+     *
+     * <p>Silent shutter in particular used to fail in complete silence: it travels through the
+     * parameter modifier, and when the modifier could not be created every call through it returned
+     * false while the row on screen still said the setting was on. A setting that did not apply is a
+     * fact the user needs, not a return value to drop.
+     */
     private void applyPlanToCamera() {
         Plan plan = engine.plan();
         StringBuilder failed = new StringBuilder();
-        if (plan.driveMode() == Plan.DRIVE_SINGLE && !camera.setDriveMode("SINGLE")) failed.append("drive ");
-        if (plan.silentShutter() && !camera.setSilentShutter(true)) failed.append("silent ");
-        if (plan.autoExposureLock() && !camera.setAutoExposureLock(true)) failed.append("ael ");
-        if (failed.length() > 0) {
-            panel.setCameraNote("\u672c\u673a\u8eab\u4e0d\u652f\u6301\uff1a" + failed.toString().trim());  // 本机身不支持
+
+        // The drive mode is applied whichever it is, not only SINGLE: a body left in a bracket or
+        // burst mode takes several frames per press, which is exactly the kind of surprise the old app
+        // shipped and this one must not.
+        String wanted = plan.driveMode() == Plan.DRIVE_BURST ? "BURST"
+                : plan.driveMode() == Plan.DRIVE_BRACKET3 ? "BRACKET" : "SINGLE";
+        if (!camera.setDriveMode(wanted)) failed.append("\u9a71\u52a8 ");                    // 驱动
+
+        if (plan.silentShutter() && !camera.setSilentShutter(true)) failed.append("\u9759\u97f3 ");  // 静音
+
+        if (plan.autoExposureLock() && !camera.setAutoExposureLock(true)) failed.append("AEL ");
+
+        String problem = camera.modifierProblem();
+        if (problem.length() > 0) {
+            // This one disables every setting above at once, so it goes on the evidence line.
+            panel.setEvidence("\u53c2\u6570\u4fee\u9970\u5668\u4e0d\u53ef\u7528\uff1a" + problem);  // 参数修饰器不可用
+        } else if (failed.length() > 0) {
+            panel.setEvidence("\u672a\u751f\u6548\uff1a" + failed.toString().trim() + "\uff08"  // 未生效
+                    + camera.modifierMethods().length() + " \u4e2a\u53ef\u7528\u65b9\u6cd5\uff09");  // 个可用方法
         }
+        panel.setCameraNote(camera.capabilities().summary());
     }
 
     // ================================================================ the loop
@@ -286,6 +308,12 @@ public class MainActivity extends Activity {
         if (!engine.canFire()) return;
         cardAtFire = card.count();
         firedAtMs = now();
+        // The numbers this app is about to judge the frame by, kept on screen: "three frames were not
+        // written" after one shutter press is a sentence that cannot be diagnosed without knowing what
+        // the card count and the per-frame file count actually were.
+        panel.setEvidence("\u5361 " + (cardAtFire == Frames.UNKNOWN ? "?" : String.valueOf(cardAtFire))
+                + "  \u6bcf\u5e27 " + Frames.filesPerFrame(engine.plan()) + " \u6587\u4ef6"
+                + "  \u9a71\u52a8 " + Hud.driveName(engine.plan().driveMode()));
 
         if (!camera.isOpen() && !camera.open()) {
             engine.stop(Engine.FAULT_CAMERA, now());
@@ -380,6 +408,14 @@ public class MainActivity extends Activity {
         } else {
             engine.step(Engine.EV_UNVERIFIED, now());
         }
+        // Raw numbers, not a verdict: how many files the card gained against what one frame of this
+        // plan is expected to produce. "One press, three frames lost" is not diagnosable without them.
+        card.refresh();
+        int gained = Frames.arrived(cardAtFire, card.count());
+        panel.setEvidence("\u5361\u589e " + gained + " \u6587\u4ef6"
+                + "  \u671f\u671b " + Frames.filesPerFrame(engine.plan())
+                + "  \u843d\u76d8 " + engine.landed()
+                + "  \u672a\u6838\u5b9e " + engine.unverified());
         panel.invalidate();
         pump();
     }

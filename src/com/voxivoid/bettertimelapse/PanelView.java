@@ -66,6 +66,7 @@ public final class PanelView extends View {
      * rounds of "boxes on screen" stayed invisible.
      */
     private String fontError = "";
+    private String evidence = "";
 
     /** Called once, the first time a frame is actually drawn. */
     private Runnable onFirstDraw;
@@ -196,6 +197,19 @@ public final class PanelView extends View {
     /** How long the first frame took, shown small on the legend row. */
     public void setStartupMs(long ms) {
         startupMs = ms;
+        invalidate();
+    }
+
+    /**
+     * The first thing that went wrong, kept on its own line for the rest of the session.
+     *
+     * <p>Every diagnostic this app has written so far has been overwritten by the next message the
+     * shell sent — which is how a reflection failure that disabled silent shutter stayed invisible
+     * while the settings row said it was applied. Evidence that scrolls away is not evidence.
+     */
+    public void setEvidence(String message) {
+        if (evidence.length() > 0) return;      // the first one is the interesting one
+        evidence = message == null ? "" : message;
         invalidate();
     }
 
@@ -476,10 +490,16 @@ public final class PanelView extends View {
         // The font failure gets its own line above the legend: it is the answer to "why is every
         // label a box", and a message that can be clipped or overwritten is a message that wastes a
         // round trip to the camera.
+        float lineHeight = paint.descent() - paint.ascent();
         if (fontError.length() > 0) {
             paint.setColor(colWarn);
-            float lineHeight = paint.descent() - paint.ascent();
             canvas.drawText(clip(fontError, w - padding * 2f), padding, y - lineHeight, paint);
+            paint.setColor(colDim);
+        }
+        if (evidence.length() > 0) {
+            paint.setColor(colWarn);
+            float at = y - lineHeight * (fontError.length() > 0 ? 2f : 1f);
+            canvas.drawText(clip(evidence, w - padding * 2f), padding, at, paint);
             paint.setColor(colDim);
         }
 

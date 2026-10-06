@@ -30,6 +30,17 @@ public final class SonyCamera {
     private Object cameraEx;
     private android.hardware.Camera camera;
     private Object modifier;
+
+    /**
+     * Why the parameter modifier could not be created; empty when it was.
+     *
+     * <p>Every camera-side setting the app makes — silent shutter, drive mode, exposure lock — travels
+     * through this one object. When {@code createParametersModifier} fails, every one of those calls
+     * returns false and the settings do nothing, which is indistinguishable from "the body does not
+     * support it" unless the reason is kept. The first version of this class dropped it in a bare
+     * catch, so silent shutter silently did nothing.
+     */
+    private String modifierProblem = "";
     private Object shutterListener;
     private String lastError = "";
 
@@ -46,6 +57,9 @@ public final class SonyCamera {
         public Boolean autoExposureLock;
         public Boolean burstTakePicture;
 
+        /** Why the parameter modifier is missing, or empty. */
+        public String modifierProblem = "";
+
         public String summary() {
             StringBuilder b = new StringBuilder();
             b.append(model.length() > 0 ? model : "?");
@@ -54,6 +68,7 @@ public final class SonyCamera {
             b.append(" drive=").append(tri(driveMode));
             b.append(" ael=").append(tri(autoExposureLock));
             b.append(" burst=").append(tri(burstTakePicture));
+            if (modifierProblem.length() > 0) b.append(" modifier=").append(modifierProblem);
             return b.toString();
         }
 
@@ -197,17 +212,26 @@ public final class SonyCamera {
 
     // ---------------------------------------------------------------- live parameters
     private Object createModifier() {
+        modifierProblem = "";
         try {
             android.hardware.Camera.Parameters params = camera.getParameters();
             Object created = cameraEx.getClass()
                     .getMethod("createParametersModifier", android.hardware.Camera.Parameters.class)
                     .invoke(cameraEx, params);
-            if (created == null) return null;
-            applyModifier(created);
+            if (created == null) {
+                modifierProblem = "createParametersModifier returned null";
+                return null;
+            }
             return created;
         } catch (Throwable t) {
+            modifierProblem = shortName(t);
             return null;
         }
+    }
+
+    /** Why the parameter modifier is unavailable; empty when it is. */
+    public String modifierProblem() {
+        return modifierProblem;
     }
 
     /**
@@ -222,6 +246,7 @@ public final class SonyCamera {
             camera.setParameters(params);
         } catch (Throwable t) {
             lastError = shortName(t);
+            modifierProblem = "applyParameters/setParameters: " + lastError;
         }
     }
 
@@ -236,7 +261,44 @@ public final class SonyCamera {
             caps.autoExposureLock = supports("isSupportedAutoExposureLock");
         }
         caps.burstTakePicture = hasMethod(cameraEx, "burstableTakePicture");
+        caps.modifierProblem = modifierProblem;
         return caps;
+    }
+
+    /**
+     * Every method this body's parameter modifier actually has, lower-cased, and the field names it
+     * exposes. The app reaches the camera by reflection with no stub jar to compile against, so the
+     * only trustworthy list of what exists is the one the camera hands back. Guessing method names
+     * from the old app's build files is how "silent shutter" ends up doing nothing.
+     */
+    public String modifierMethods() {
+        if (modifier == null) {
+            return modifierProblem.length() > 0
+                    ? "(no modifier: " + modifierProblem + ")"
+                    : "(no modifier)";
+        }
+        StringBuilder b = new StringBuilder();
+        try {
+            java.lang.reflect.Method[] methods = modifier.getClass().getMethods();
+            java.util.Arrays.sort(methods, new java.util.Comparator<java.lang.reflect.Method>() {
+                @Override
+                public int compare(java.lang.reflect.Method a, java.lang.reflect.Method c) {
+                    return a.getName().compareTo(c.getName());
+                }
+            });
+            for (java.lang.reflect.Method m : methods) {
+                if (m.getDeclaringClass() == Object.class) continue;
+                if (b.length() > 0) b.append(' ');
+                b.append(m.getName());
+            }
+            b.append(" || fields:");
+            for (java.lang.reflect.Field f : modifier.getClass().getFields()) {
+                b.append(' ').append(f.getName());
+            }
+        } catch (Throwable t) {
+            b.append("(listing failed: ").append(shortName(t)).append(')');
+        }
+        return b.toString();
     }
 
     private Boolean supports(String method) {
