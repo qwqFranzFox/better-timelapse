@@ -24,6 +24,8 @@
 | A14 | 当前阶段先做文档与规划，不产出 APK | 相机未连接、工具链未就位，任何「构建绿」都不是证据 | 见 [PLAN.md](PLAN.md) §6 的 M0 前置 |
 | A15 | **构建一律走容器，由用户执行。agent 不在本机安装工具链** | 本机沙箱不允许：`/usr` 是 `nosuid`，rootless podman 的 `newuidmap` 拿不到 capability；`/run`、`/home` 只读，`/opt` 不可写。之前我在工作区里装过一份 4 GB 的 `.toolchain` 跑构建，用户明确否掉了 | 改完代码后**不要自己跑构建**；只在必须验证的节点停下来，让用户执行 `./build-container.sh`，然后把输出贴回来。`tools/setup-toolchain.sh` 只作为「宿主机没有容器运行时」的逃生口保留，仓库不依赖它 |
 | A16 | 验证脚本在缺可选依赖时**只跳过并说明，不让构建失败** | 已经踩过：镜像里没有 `python3`，`build.sh` 第 7 步直接以非零退出，而那时 APK 已经签好了 —— 一个可选工具不该把构建判死 | `build.sh` 用 `command -v python3` 判断并打印 `NOT CHECKED` 提示；同时 `docker/Dockerfile` 装上 `python3`，让正常路径始终真的检查 |
+| A17 | 每帧结束**必须** `cancelTakePicture()`；快门调用被拒要**重试**，并且单独算一种故障（`FAULT_SHUTTER`），不算「未写入」 | 真机实测（见 [PLATFORM-FACTS](PLATFORM-FACTS.md) §4）：按下中心后**只拍成 1 张**，之后三次调用全被拒，屏上却报「连续 3 张未写入」。老 app 每次 `onShutter` 都无条件 `cancelTakePicture()`（TimeLapse `ShootActivity.java:364`）—— 这一条它是对的，我漏了；而「相机不收这一枪」和「文件没落盘」是两种病，报成一句诊断不了任何东西 | `settleFrame()` 开头 `camera.cancel()`；`fire()` 失败重试 4 次 × 500ms（重试前先 `cancel`）；`Engine.onCallFailed` → `FAULT_SHUTTER`（「快门调用失败」）；平台原话上 `evidence` 行，故障屏同时显示「已落盘 N 张」与最后一次失败原因 |
+| A18 | 读卡计数**递归整棵 DCIM**；「app 看不到卡」永远不等于「拍失败」 | 真机实测：同一时刻递归数 `DCIM` 得 669，只数一层子目录得 668 —— 相机确实会写到 roll 子目录以外。只数一层意味着计数永不增长，每一张都被判「未写入」（而且这正是上一轮的故障原因）。另外，把「app 自己的盲区」当成「拍摄失败」直接判故障，是把测量失败读成了负面证据 | `Card.walk()` 递归并记录最新文件**全路径**；面板加「最新 \<文件\> \<n\>前」一行；卡计数不可用时走 `EV_UNVERIFIED`（照拍、标「未核实」），不再计入连续失败 |
 
 ---
 

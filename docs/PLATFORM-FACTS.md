@@ -79,6 +79,7 @@ Camera camera = (Camera) cx.getMethod("getNormalCamera").invoke(cameraEx);
 | 机型与平台：`ScalarProperties.getString("model.name")` / `getString("version.platform")` | 【实测·skill】 |
 | 某个键是否存在：`ScalarInput.getKeyStatus(scan).valid`；是否按下：同一次调用的 `.status` | 【实测·skill】（标注：skill 说「尚未在相机上验证」） |
 | 支持性探测：`ParametersModifier.isSupportedSilentShutterMode()`；否则 `setSilentShutterMode()` 会 `NoSuchMethodError` | 【上游源码；recipe-lab 记录 `setSilentShutterMode` 不是所有机身都有】 |
+| **`burstableTakePicture()` 与 `cancelTakePicture()` 是一对**：前者把快门按住（名字是字面意思），后者放开。不在每次快门回调里 `cancel`，下一次 `burstableTakePicture()` 会被拒绝（反射抛出，`InvocationTargetException` 里裹着平台自己的异常） | 【实测·本机】+【上游源码：老 app 每次 `onShutter` 都无条件 `cancelTakePicture()`，TimeLapse `ShootActivity.java:364`】 |
 | `ParametersModifier` 被调用的方法名（`setFocusMode` / `setDriveMode` / `setBurstDriveSpeed` / `setBurstDriveButtonReleaseBehave` / `setSilentShutterMode` / `setAutoExposureLock` / `setBracketMode` / `setExposureBracketMode` / `setExposureBracketPeriod` / `setNumOfBracketPicture`，以及常量 `DRIVE_MODE_*` / `AE_LOCK_ON` / `BRACKET_MODE_EXPOSURE` / `EXPOSURE_BRACKET_MODE_SINGLE`） | 【未验证】—— 这些名字来自老 app 的编译期依赖（TimeLapse 的 `app/build.gradle` 里那个已死的 `-SNAPSHOT` stub），**需要真机反射验证** |
 
 ### 4.1 实时预览参数（Sony 的参数字符串）

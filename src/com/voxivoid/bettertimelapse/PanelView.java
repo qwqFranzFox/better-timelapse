@@ -472,8 +472,18 @@ public final class PanelView extends View {
             paint.setTextSize(bigSize * 0.80f);
             paint.setColor(colWarn);
             String why = engine.faultText();
-            canvas.drawText(why.length() > 0 ? why : Hud.statePlain(engine.state()),
-                    padding, baselineIn(top, height * 0.4f, paint), paint);
+            canvas.drawText(clip(why.length() > 0 ? why : Hud.statePlain(engine.state()), full),
+                    padding, baselineIn(top, height * 0.32f, paint), paint);
+            // What the run did achieve, and what the last refusal said. A faulted run is exactly when
+            // these two lines matter most, and the first version of this branch returned here and hid
+            // both of them: the screen said a run had failed and nothing about what it had done.
+            paint.setTextSize(smallSize);
+            paint.setColor(colText);
+            String second = Hud.progressLine(engine.landed(), engine.plan().frames(),
+                    engine.unverified(), now());
+            if (engine.lastLoss().length() > 0) second = second + "   " + engine.lastLoss();
+            canvas.drawText(clip(second, full), padding,
+                    baselineIn(top + height * 0.40f, height * 0.46f, paint), paint);
             return;
         }
 

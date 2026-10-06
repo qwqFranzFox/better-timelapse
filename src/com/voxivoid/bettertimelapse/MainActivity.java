@@ -46,6 +46,17 @@ public class MainActivity extends Activity {
     /** The watchdog period while a frame is in flight. */
     private static final long LAND_CHECK_MS = 400;
 
+    /**
+     * How many times a refused shutter call is retried, and how long between attempts.
+     *
+     * <p>The platform refuses {@code burstableTakePicture} while it is still busy with the previous
+     * frame. That is transient, and it is not a lost frame: the first version counted the refusal as a
+     * lost frame and stopped a run after the first photograph, over a camera that was merely still
+     * writing. Retries are cheap; a thrown-away night is not.
+     */
+    private static final int FIRE_ATTEMPTS = 4;
+    private static final long FIRE_RETRY_MS = 500;
+
     /** How long a frame may take to appear on the card before it counts as lost. */
     private static final long LAND_TIMEOUT_MS = Frames.LAND_TIMEOUT_MS;
 
@@ -68,6 +79,18 @@ public class MainActivity extends Activity {
     /** Files on the card when the current frame was fired; the difference is the frame. */
     private int cardAtFire = Frames.UNKNOWN;
     private long firedAtMs;
+
+    /** Attempts at the frame currently due; cleared by a call the camera accepted. */
+    private int fireAttempts;
+
+    /**
+     * A frame the camera reported whose file the card has not accounted for yet.
+     *
+     * <p>One slot, because one frame is in flight at a time: the file it wrote is looked for again when
+     * the next frame fires. A card slower than that is reported as unconfirmed, which is true.
+     */
+    private boolean pendingOpen;
+    private int pendingAt = Frames.UNKNOWN;
 
     private long measuredFrameBytes;
 
@@ -144,6 +167,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         handler.removeCallbacks(onTick);
         handler.removeCallbacks(onCheckLanding);
+        handler.removeCallbacks(onRetryFire);
         handler.removeCallbacks(onDevice);
         // Clear every hold: a release that lands while the app is not looking must not leave a key
         // stuck down, which is the failure that makes a camera app look broken.
@@ -315,14 +339,19 @@ public class MainActivity extends Activity {
             return;
         }
         if (!engine.canFire()) return;
-        cardAtFire = card.count();
+        card.refresh();
+        int nowCount = card.count();
+        // Settle the previous frame's open question first: its file has had a whole interval to appear,
+        // which is longer than the window the watchdog can afford without holding up the next frame.
+        // The immediate check below is made a fraction of a second after the shutter callback, when a
+        // card that takes a second to write has not written anything yet — so "the count did not move"
+        // there means "not yet", and this is where "yet" is answered.
+        if (pendingOpen) {
+            pendingOpen = false;
+            if (Frames.frameArrived(pendingAt, nowCount, engine.plan())) engine.accountFor();
+        }
+        cardAtFire = nowCount;
         firedAtMs = now();
-        // The numbers this app is about to judge the frame by, kept on screen: "three frames were not
-        // written" after one shutter press is a sentence that cannot be diagnosed without knowing what
-        // the card count and the per-frame file count actually were.
-        panel.setNumbers("\u5361 " + (cardAtFire == Frames.UNKNOWN ? "?" : String.valueOf(cardAtFire))
-                + "  \u6bcf\u5e27 " + Frames.filesPerFrame(engine.plan()) + " \u6587\u4ef6"
-                + "  \u9a71\u52a8 " + Hud.driveName(engine.plan().driveMode()));
 
         if (!camera.isOpen() && !camera.open()) {
             engine.stop(Engine.FAULT_CAMERA, now());
@@ -331,14 +360,45 @@ public class MainActivity extends Activity {
             return;
         }
         if (!camera.fire()) {
-            panel.setCameraNote("\u5feb\u95e8\u8c03\u7528\u5931\u8d25\uff1a" + camera.lastError());  // 快门调用失败
-            engine.onFrameLost("call failed", now());
+            // The call itself was refused. What the platform said goes on the evidence line, which
+            // keeps the first failure it is told about: "快门调用失败" on its own is not a diagnosis,
+            // and the fault that follows is not "the frame was not written" — this app knows nothing
+            // about the card when the shutter never fired.
+            String why = camera.lastError();
+            panel.setEvidence("\u5feb\u95e8\u8c03\u7528\u5931\u8d25\uff1a" + why);       // 快门调用失败：
+            fireAttempts++;
+            if (fireAttempts < FIRE_ATTEMPTS) {
+                // Close whatever the camera still thinks it is doing before asking again: a capture
+                // left open is the usual reason for the refusal, and the retry is worth nothing if the
+                // thing that caused it is still in flight.
+                camera.cancel();
+                handler.postDelayed(onRetryFire, FIRE_RETRY_MS);
+                panel.invalidate();
+                return;
+            }
+            fireAttempts = 0;
+            panel.setCameraNote("\u5feb\u95e8\u8c03\u7528\u5931\u8d25\uff1a" + why);     // 快门调用失败：
+            engine.onCallFailed(why, now());
             pump();
             return;
         }
+        fireAttempts = 0;
         handler.removeCallbacks(onCheckLanding);
         handler.postDelayed(onCheckLanding, LAND_CHECK_MS);
     }
+
+    /**
+     * Another go at the frame the platform refused a moment ago.
+     *
+     * <p>Straight back into {@link #fire()}, which is safe because a refused call never advanced the
+     * machine: the frame is still the frame that was due.
+     */
+    private final Runnable onRetryFire = new Runnable() {
+        @Override
+        public void run() {
+            fire();
+        }
+    };
 
     /**
      * The watchdog: how the card is consulted, and what happens when it cannot be.
@@ -356,6 +416,10 @@ public class MainActivity extends Activity {
      *   <li>the count is unavailable — the frame counts as taken and is reported as unconfirmed;</li>
      *   <li>the card went from readable to unreadable — a fault, because retrying cannot help.</li>
      * </ul>
+     *
+     * <p>Every outcome goes through {@link #settleFrame}, so the verdict and the numbers behind it are
+     * written in one place. Splitting them meant the watchdog's verdict never reached the numbers line,
+     * and the screen showed a stale one from the last shutter call instead.
      */
     private final Runnable onCheckLanding = new Runnable() {
         @Override
@@ -370,17 +434,13 @@ public class MainActivity extends Activity {
                 // The app cannot see the camera's files at all, so it has no evidence either way. That
                 // is not a reason to fail the run: the frame counts as taken and unconfirmed, which is
                 // what it is. Failing here told the user nothing except that the app gave up.
-                engine.step(Engine.EV_UNVERIFIED, now());
-                panel.invalidate();
-                pump();
+                settleFrame(false);
                 return;
             }
             if (now() - firedAtMs >= LAND_TIMEOUT_MS) {
                 // The file never showed up in the time a write takes. The camera did report the frame,
                 // so it counts — as unconfirmed, which is what it is.
-                engine.step(Engine.EV_UNVERIFIED, now());
-                panel.invalidate();
-                pump();
+                settleFrame(false);
                 return;
             }
             handler.postDelayed(this, LAND_CHECK_MS);
@@ -396,7 +456,20 @@ public class MainActivity extends Activity {
     private final SonyCamera.ShutterEvents onShutter = new SonyCamera.ShutterEvents() {
         @Override
         public void onShutter() {
+            // The platform calls this from its own thread, and the engine, the card walk and the panel
+            // all belong to the UI thread. Hopping across also serialises the callback against the
+            // watchdog — the pending check is cancelled and the frame settled as one step — so the two
+            // cannot both count the same frame.
+            handler.post(onFrameTaken);
+        }
+    };
+
+    /** The frame the camera reported, settled on the UI thread. */
+    private final Runnable onFrameTaken = new Runnable() {
+        @Override
+        public void run() {
             handler.removeCallbacks(onCheckLanding);
+            if (engine.state() != Engine.EXPOSING) return;      // the watchdog got there first
             // The camera reported the frame; that is enough to count it. The card is read to confirm,
             // never to contradict: a count this app cannot see is not a missing frame.
             card.refresh();
@@ -412,24 +485,59 @@ public class MainActivity extends Activity {
      *                  rather than claiming a loss it cannot see.
      */
     private void settleFrame(boolean confirmed) {
+        // End the capture before anything else. `burstableTakePicture` holds the shutter open — the
+        // name is literal — and the platform refuses the next call while one is in flight. This is the
+        // one thing the old app got exactly right and this one left out: TimeLapse calls
+        // `cancelTakePicture()` from its own shutter callback on every frame
+        // (TimeLapse ShootActivity.java:364). Without it the first frame is taken, and every call after
+        // it is refused — which is precisely the run that stopped after one photograph.
+        camera.cancel();
         if (confirmed) {
             if (card.newestStamp() > 0) measuredFrameBytes = card.estimatedFrameBytes();
             engine.setLastFile(card.newestName());
             engine.step(Engine.EV_SHUTTER, now());
+            pendingOpen = false;
         } else {
             engine.step(Engine.EV_UNVERIFIED, now());
+            // Left open on purpose: the count is taken again when the next frame fires, and this frame
+            // stops being "unconfirmed" the moment its file turns up.
+            pendingOpen = true;
+            pendingAt = cardAtFire;
         }
         // Raw numbers, not a verdict: how many files the card gained against what one frame of this
-        // plan is expected to produce. "One press, three frames lost" is not diagnosable without them.
+        // plan is expected to produce, and where the newest file on the card actually is. "One press,
+        // N frames lost" is not diagnosable without them, and a count that never moves is either a
+        // camera writing somewhere else or a walk looking in the wrong place — the path tells those two
+        // apart, which no number of re-runs of the same build would have.
         card.refresh();
-        panel.setRoots("\u5361\u6839 " + card.rootsReport());                                  // 卡根
+        panel.setRoots("\u5361\u6839 " + card.rootsReport() + "  " + newestLine());            // 卡根
         int gained = Frames.arrived(cardAtFire, card.count());
         panel.setNumbers("\u5361\u589e " + gained + " \u6587\u4ef6"
                 + "  \u671f\u671b " + Frames.filesPerFrame(engine.plan())
                 + "  \u843d\u76d8 " + engine.landed()
-                + "  \u672a\u6838\u5b9e " + engine.unverified());
+                + "  \u672a\u6838\u5b9e " + engine.unverified()
+                + "  \u5361 " + (card.count() == Frames.UNKNOWN ? "?" : String.valueOf(card.count())));
         panel.invalidate();
         pump();
+    }
+
+    /**
+     * The newest file on the card, and how long ago it was written.
+     *
+     * <p>This is the line that answers "is the camera writing at all": the name changes on every frame
+     * and the age stays in seconds when it is. A name that does not move, or an age in minutes, means
+     * the camera is writing somewhere this app is not looking — or not writing at all.
+     */
+    private String newestLine() {
+        if (card.newestStamp() <= 0) return "\u6700\u65b0 \u65e0";                    // 最新 无
+        // The path from DCIM down, not just the name: whether the camera files into a roll directory or
+        // drops the file straight into DCIM is the difference between "this app was looking in the
+        // wrong place" and "the camera writes somewhere else entirely", and only the path says which.
+        String where = card.newestPath();
+        int dcim = where.indexOf("/DCIM/");
+        if (dcim >= 0) where = where.substring(dcim + 1);
+        return "\u6700\u65b0 " + where + " "
+                + Hud.age(System.currentTimeMillis() - card.newestStamp()) + "\u524d";  // 最新 <路径> <n>前
     }
 
     // ================================================================ device status
@@ -578,6 +686,7 @@ public class MainActivity extends Activity {
             engine.stop(Engine.FAULT_ABORTED, now());
             handler.removeCallbacks(onTick);
             handler.removeCallbacks(onCheckLanding);
+            handler.removeCallbacks(onRetryFire);
             panel.setCameraNote("\u5df2\u505c\u6b62\uff1a\u5df2\u62cd " + engine.landed() + " \u5f20");  // 已停止：已拍 N 张
             panel.invalidate();
         }

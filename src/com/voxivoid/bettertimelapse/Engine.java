@@ -47,7 +47,7 @@ public final class Engine {
      * so they are not merged into one "card" failure the user cannot act on.
      */
     public static final int FAULT_NONE = 0, FAULT_CAMERA = 1, FAULT_CARD = 2, FAULT_WRITE = 3,
-            FAULT_ABORTED = 4;
+            FAULT_ABORTED = 4, FAULT_SHUTTER = 5;
 
     /** The states the panel's seven words map onto; kept in step with {@link Hud}. */
     public static int hudState(int state) {
@@ -86,6 +86,9 @@ public final class Engine {
 
     /** The last frame that landed, for the panel's "landed n / planned m". */
     private String lastFile = "";
+
+    /** Why the last frame was judged lost, in the words of whatever reported it. */
+    private String lastLoss = "";
 
     /**
      * Frames the camera reported that the card count could not corroborate.
@@ -246,6 +249,7 @@ public final class Engine {
         consecutiveFailures = 0;
         unverified = 0;
         lastFile = "";
+        lastLoss = "";
         return ACT_NONE;
     }
 
@@ -316,8 +320,23 @@ public final class Engine {
         return unverified;
     }
 
+    /**
+     * The card caught up: a frame that was reported but not confirmed has since been accounted for.
+     *
+     * <p>"Unconfirmed" is a statement about the last look, not a verdict. A write that takes longer
+     * than the confirmation window is not a lost frame, and the count is taken again when the next
+     * frame fires — so this comes back down when the file appears. Making it permanent meant a card
+     * whose writes take two seconds reported every single frame as unconfirmed while every frame was
+     * arriving perfectly well, which is the same mistake as the fault that started this: a missing
+     * measurement read as a negative one.
+     */
+    public void accountFor() {
+        if (unverified > 0) unverified--;
+    }
+
     public int onFrameLost(String why, long nowMs) {
         if (state != EXPOSING) return ACT_NONE;
+        lastLoss = why;
         consecutiveFailures++;
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
             fault = FAULT_WRITE;
@@ -329,6 +348,35 @@ public final class Engine {
         attemptsForCurrentFrame = 0;
         state = WAITING;
         return ACT_ARM_TIMER;
+    }
+
+    /**
+     * The platform refused the shutter call itself, retries and all.
+     *
+     * <p>Counted like a lost frame — a camera that will not take a frame is a broken run — but faulted
+     * as {@link #FAULT_SHUTTER}, because "the body would not take the picture" and "the picture never
+     * reached the card" send the user to different places. The first version of this reported every
+     * failure that way as "3 frames were not written", which was a guess dressed as a diagnosis.
+     */
+    public int onCallFailed(String why, long nowMs) {
+        if (state != EXPOSING) return ACT_NONE;
+        lastLoss = why;
+        consecutiveFailures++;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            fault = FAULT_SHUTTER;
+            state = FAULT;
+            schedule.finish();
+            return ACT_NONE;
+        }
+        schedule.advance();
+        attemptsForCurrentFrame = 0;
+        state = WAITING;
+        return ACT_ARM_TIMER;
+    }
+
+    /** Why the last frame was judged lost, in the words of whatever reported it. */
+    public String lastLoss() {
+        return lastLoss;
     }
 
     public void setLastFile(String name) {
@@ -352,6 +400,8 @@ public final class Engine {
                 return "\u8fde\u7eed " + MAX_CONSECUTIVE_FAILURES + " \u5f20\u672a\u5199\u5165";  // 连续 N 张未写入
             case FAULT_ABORTED:
                 return "\u5df2\u624b\u52a8\u505c\u6b62";                          // 已手动停止
+            case FAULT_SHUTTER:
+                return "\u5feb\u95e8\u8c03\u7528\u5931\u8d25";                    // 快门调用失败
             default:
                 return "";
         }

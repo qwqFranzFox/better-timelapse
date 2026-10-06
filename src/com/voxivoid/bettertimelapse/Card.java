@@ -50,9 +50,23 @@ public final class Card {
     /** Extension of the newest image found, so the panel can say what is being written. */
     private long newestStamp;
     private String newestName = "";
+    private String newestPath = "";
     private long newestBytes;
     private int count = Frames.UNKNOWN;
     private boolean readable;
+
+    /**
+     * Accumulators for one walk.
+     *
+     * <p>Fields rather than a result object because the walk happens on one thread and returns four
+     * numbers that are always wanted together; handing them back through an object would mean an
+     * allocation on every frame of a night-long run.
+     */
+    private int walkCount;
+    private long walkStamp;
+    private String walkName = "";
+    private String walkPath = "";
+    private long walkBytes;
 
     /**
      * Read the card. Call it before a run and again after each frame; it is a directory walk, not a
@@ -119,33 +133,17 @@ public final class Card {
             return;
         }
         readable = true;
-        int found = 0;
-        long stamp = 0;
-        String name = "";
-        File[] rolls = dcim.listFiles();
-        if (rolls == null) {
-            readable = false;
-            count = Frames.UNKNOWN;
-            return;
-        }
-        for (File roll : rolls) {
-            if (!roll.isDirectory()) continue;
-            File[] files = roll.listFiles();
-            if (files == null) continue;
-            for (File f : files) {
-                if (!f.isFile() || !isImage(f.getName())) continue;
-                found++;
-                long modified = f.lastModified();
-                if (modified >= stamp) {
-                    stamp = modified;
-                    name = f.getName();
-                    newestBytes = f.length();
-                }
-            }
-        }
-        count = found;
-        newestStamp = stamp;
-        newestName = name;
+        walkCount = 0;
+        walkStamp = 0;
+        walkName = "";
+        walkPath = "";
+        walkBytes = 0;
+        walk(dcim);
+        count = walkCount;
+        newestStamp = walkStamp;
+        newestName = walkName;
+        newestPath = walkPath;
+        newestBytes = walkBytes;
     }
 
     /** How many images the card holds, or {@link Frames#UNKNOWN}. */
@@ -168,6 +166,16 @@ public final class Card {
     }
 
     /**
+     * Where the newest image actually is, full path.
+     *
+     * <p>Not decoration: the whole question of whether this app can see the camera's files is answered
+     * by that path, and a name alone does not say which directory the camera wrote into.
+     */
+    public String newestPath() {
+        return newestPath;
+    }
+
+    /**
      * The newest file's size in bytes, recorded during {@link #refresh()} rather than by a second
      * walk of the tree: on a card holding thousands of files a second walk is the same cost again,
      * and this number is only ever wanted right after a refresh.
@@ -181,7 +189,38 @@ public final class Card {
         return Device.freeBytes();
     }
 
-    /** Images under a directory tree, for the root report. */
+    /**
+     * Count the images under a directory tree and remember the newest.
+     *
+     * <p>Recursive, and it really does descend: the first version looked only one level below
+     * {@code DCIM} — assuming the camera files everything into its roll subdirectories, the way a
+     * camera's card is usually laid out. On this body it does not hold: the tree held one image more
+     * than the count did, the count therefore never moved when a frame was taken, and every frame of
+     * the run was read as "not written". The layout of someone else's card is not something to assume,
+     * and the cost of walking it is a handful of {@code listFiles} calls.
+     */
+    private void walk(File dir) {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (int i = 0; i < files.length; i++) {
+            File f = files[i];
+            if (f.isDirectory()) {
+                walk(f);
+                continue;
+            }
+            if (!f.isFile() || !isImage(f.getName())) continue;
+            walkCount++;
+            long modified = f.lastModified();
+            if (modified >= walkStamp) {
+                walkStamp = modified;
+                walkName = f.getName();
+                walkPath = f.getPath();
+                walkBytes = f.length();
+            }
+        }
+    }
+
+    /** Images under a directory tree, for the root report. Does not disturb the walk accumulators. */
     private static int countImages(File dir) {
         int n = 0;
         File[] files = dir.listFiles();

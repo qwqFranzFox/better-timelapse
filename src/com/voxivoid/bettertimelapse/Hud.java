@@ -245,6 +245,15 @@ public final class Hud {
         return "\u5df2\u843d\u76d8 " + of + tail;
     }
 
+    /** How long ago, in the shortest unit that says it: {@code 7s}, {@code 3min}, {@code 2h}. */
+    public static String age(long ms) {
+        if (ms < 0) ms = 0;
+        long s = ms / 1000;
+        if (s < 60) return s + "s";
+        if (s < 3600) return (s / 60) + "min";
+        return (s / 3600) + "h";
+    }
+
     /**
      * The measured line: the mean interval actually achieved and the drift per frame, against the
      * interval asked for. The old app showed a theoretical number that was wrong by a factor of
