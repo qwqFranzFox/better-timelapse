@@ -38,7 +38,7 @@ import android.view.KeyEvent;
  *       its clock, which is the second cause of the old app's drift (U-18).</li>
  * </ol>
  */
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements android.view.SurfaceHolder.Callback {
 
     /** How often the device status (battery, card) is re-read. Both change over minutes. */
     private static final long DEVICE_MS = 5000;
@@ -57,10 +57,20 @@ public class MainActivity extends Activity {
     /** Fallback frame size for the card estimate, until one can be measured off the card. */
     private static final long FALLBACK_FRAME_BYTES = 6L * 1024 * 1024;
 
+    /**
+     * The preview surface, behind the panel and never seen.
+     *
+     * <p>This app draws its whole interface on a Canvas, and a capture on this platform needs a live
+     * preview stream — Recipe Lab keeps one for the same reason. It sits behind the opaque panel, so it
+     * costs nothing to look at and everything to leave out.
+     */
+    private android.view.SurfaceView preview;
+
     private final Handler handler = new Handler();
     private final Keys.Hold trash = new Keys.Hold();
     private final Keys.Hold centre = new Keys.Hold();
     private final Keys.Hold menu = new Keys.Hold();
+    private final Keys.Hold down = new Keys.Hold();
     private final SonyCamera camera = new SonyCamera();
     private final Card card = new Card();
 
@@ -69,6 +79,9 @@ public class MainActivity extends Activity {
 
     /** Set once the startup work has been queued, so it happens on the first resume only. */
     private boolean started;
+
+    /** The user's own silent-shutter answer, while rehearsal is borrowing the row. */
+    private int silentBeforeRehearsal;
 
     /** When the current frame was handed to the camera, for the callback latency. */
     private long firedAtMs;
@@ -108,6 +121,7 @@ public class MainActivity extends Activity {
     private int callbacks;
     private long callbackMsTotal;
 
+
     private long measuredFrameBytes;
 
     /**
@@ -143,7 +157,17 @@ public class MainActivity extends Activity {
                 onFirstFrame();
             }
         });
-        setContentView(panel);
+        android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        preview = new android.view.SurfaceView(this);
+        preview.getHolder().setType(android.view.SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+        preview.getHolder().addCallback(this);
+        root.addView(preview, new android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(panel, new android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(root);
         if (pendingFontError.length() > 0) {
             panel.setFontNote("\u5b57\u4f53\u672a\u52a0\u8f7d");                            // 字体未加载
             panel.setFontError(pendingFontError);
@@ -182,7 +206,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         handler.removeCallbacks(onTick);
-        handler.removeCallbacks(onCallbackTimeout);
+        handler.removeCallbacks(onRelease);
         handler.removeCallbacks(onRetryFire);
         handler.removeCallbacks(onVerdict);
         handler.removeCallbacks(onDevice);
@@ -194,7 +218,7 @@ public class MainActivity extends Activity {
         // The camera belongs to the camera when this app is not in front, and releasing it here is
         // also what makes the next open clean.
         camera.clearShutterListener();
-        camera.cancel();
+        camera.release();
         camera.close();
         super.onPause();
     }
@@ -260,7 +284,7 @@ public class MainActivity extends Activity {
             return;
         }
         camera.setShutterListener(onShutter);
-        panel.setCameraNote(camera.capabilities().summary());
+        panel.setCameraNote(camera.capabilities().summary(camera.previewing()));
         applyPlanToCamera();
     }
 
@@ -301,7 +325,24 @@ public class MainActivity extends Activity {
             panel.setEvidence("\u672a\u751f\u6548\uff1a" + failed.toString().trim() + "\uff08"  // 未生效
                     + camera.modifierMethods().length() + " \u4e2a\u53ef\u7528\u65b9\u6cd5\uff09");  // 个可用方法
         }
-        panel.setCameraNote(camera.capabilities().summary());
+        panel.setCameraNote(camera.capabilities().summary(camera.previewing()));
+    }
+
+    // ================================================================ the preview surface
+
+    @Override
+    public void surfaceCreated(android.view.SurfaceHolder holder) {
+        camera.attachPreview(holder);
+    }
+
+    @Override
+    public void surfaceChanged(android.view.SurfaceHolder holder, int format, int w, int h) {
+        // The surface is created once and never resized: the panel is the whole screen.
+    }
+
+    @Override
+    public void surfaceDestroyed(android.view.SurfaceHolder holder) {
+        // Nothing to do: onPause releases the camera, which is what owns the stream.
     }
 
     // ================================================================ the loop
@@ -309,20 +350,22 @@ public class MainActivity extends Activity {
     /**
      * Say so, before the run starts, when the plan asks for more than the camera can do.
      *
-     * <p>The interval is a promise about the clock, and the settle delay is this plan's own estimate of
-     * how long the body needs after a frame before it can take the next one. If the interval is shorter
-     * than that, no amount of care in this app will produce it — the camera sets the pace, every frame
-     * comes late, and the honest thing is to say it on screen before the shutter is pressed rather than
-     * to let the user find out from a finished film (docs/PLAN.md §4.3). The app does not silently
-     * stretch the interval to cover it: that would be the old app's failure, a number on screen that is
-     * not the number being shot.
+     * <p>The interval is a promise about the clock, and the shutter itself takes time: the press and the
+     * release cannot overlap, and on this body that pair wants {@link Frames#PRESS_MS} — measured on
+     * this hardware by Recipe Lab, not guessed. Anything shorter than that cannot be shot here, and the
+     * honest thing is to say so before the shutter is pressed rather than to let the user find out from
+     * a finished film (docs/PLAN.md §4.3). What this app does <em>not</em> do is stretch the interval
+     * quietly to cover it: that is the old app's failure, a number on screen that is not the number
+     * being shot.
      */
     private void warnIfImpossible() {
         Plan plan = engine.plan();
-        if (plan.intervalMs() >= plan.settleMs()) return;
+        long shortest = Frames.shortestIntervalMs();
+        if (plan.intervalMs() >= shortest) return;
         panel.setEvidence("\u95f4\u9694 " + Steps.shortMs(plan.intervalMs())                // 间隔
-                + " \u6bd4\u7a33\u5b9a\u5ef6\u65f6 " + Steps.shortMs(plan.settleMs())        // 比稳定延时
-                + " \u77ed\uff1a\u76f8\u673a\u53ef\u80fd\u8ddf\u4e0d\u4e0a");                 // 短：相机可能跟不上
+                + " \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 "                        // 短于本机身所需的
+                + Steps.shortMs((int) shortest)                                                     // 2.9s
+                + "\uff1a\u76f8\u673a\u4f1a\u6765\u4e0d\u53ca");                          // ：相机会来不及
     }
 
     /**
@@ -400,10 +443,9 @@ public class MainActivity extends Activity {
             panel.setEvidence("\u5feb\u95e8\u8c03\u7528\u5931\u8d25\uff1a" + why);       // 快门调用失败：
             fireAttempts++;
             if (fireAttempts < FIRE_ATTEMPTS) {
-                // Close whatever the camera still thinks it is doing before asking again: a capture
-                // left open is the usual reason for the refusal, and the retry is worth nothing if the
-                // thing that caused it is still in flight.
-                camera.cancel();
+                // Let go before asking again: a shutter still held is the usual reason for a refusal,
+                // and a retry is worth nothing while the thing that caused it is still in flight.
+                camera.release();
                 handler.postDelayed(onRetryFire, FIRE_RETRY_MS);
                 panel.invalidate();
                 return;
@@ -415,8 +457,11 @@ public class MainActivity extends Activity {
             return;
         }
         fireAttempts = 0;
-        handler.removeCallbacks(onCallbackTimeout);
-        handler.postDelayed(onCallbackTimeout, Frames.callbackTimeoutMs(engine.plan()));
+        // The shutter is held, not just pressed: the release is what ends the capture and what the next
+        // frame waits for. It is scheduled here, against the frame's own moment, so the press window is
+        // as long as this body wants it to be and no longer (docs/DECISIONS.md A20).
+        handler.removeCallbacks(onRelease);
+        handler.postDelayed(onRelease, Frames.pressWindowMs(engine.plan()));
     }
 
     /**
@@ -433,64 +478,53 @@ public class MainActivity extends Activity {
     };
 
     /**
-     * The camera never reported the frame.
+     * Let go of the shutter, and count the frame.
      *
-     * <p>It still counts as taken — the call was accepted, and the card is what decides whether
-     * anything was written — but the machine has to let go of the frame, or the next one cannot be
-     * fired at its own due moment and one missing callback would cost the run its cadence.
+     * <p>This is the frame's end, and it is a timer rather than a callback on purpose. The platform's
+     * own idiom is a press and a release ({@code takePicture} / {@code cancelTakePicture}), and a plain
+     * {@code takePicture} reports nothing back at all — so the moment the capture has had its time is
+     * the honest end of the frame, not the arrival of a callback that may never come. A callback that
+     * does arrive is counted, and never waited for.
      */
-    private final Runnable onCallbackTimeout = new Runnable() {
+    private final Runnable onRelease = new Runnable() {
         @Override
         public void run() {
-            if (engine.state() != Engine.EXPOSING) return;
-            frameTaken(false);
+            camera.release();
+            frameTaken();
         }
     };
 
     /**
-     * The shutter callback: the body says a frame was taken.
+     * The shutter callback, when the body offers one.
      *
-     * <p>It reports a frame, and that is all it is taken for. The card has the last word, later, on a
-     * worker thread — a camera that reports a frame it never wrote cannot make the app claim it was
-     * written.
+     * <p>Statistics, not a verdict: it says the body noticed a shutter, which is worth counting (the
+     * panel shows {@code 回执 n/m}) but is not what decides anything. The card decides, later, on a
+     * worker thread.
      */
     private final SonyCamera.ShutterEvents onShutter = new SonyCamera.ShutterEvents() {
         @Override
         public void onShutter() {
-            // The platform calls this from its own thread; the engine, the panel and the counters all
-            // belong to the UI thread. Hopping across also serialises the callback against the timeout,
-            // so the two cannot both count the same frame.
-            handler.post(onFrameTaken);
+            // The platform calls this from its own thread; the counters belong to the UI thread.
+            handler.post(onFrameReported);
         }
     };
 
-    private final Runnable onFrameTaken = new Runnable() {
+    private final Runnable onFrameReported = new Runnable() {
         @Override
         public void run() {
-            handler.removeCallbacks(onCallbackTimeout);
-            if (engine.state() != Engine.EXPOSING) return;      // the timeout got there first
-            frameTaken(true);
+            if (engine.state() != Engine.EXPOSING) return;      // already released
+            callbacks++;
+            if (firedAtMs > 0) callbackMsTotal += now() - firedAtMs;
         }
     };
 
     /**
      * End the frame: count it, arm the next one, and leave the card to answer later.
      *
-     * <p>Two things happen in a fixed order, and both are about time. The capture is cancelled first,
-     * because {@code burstableTakePicture} holds the shutter open until {@code cancelTakePicture}
-     * closes it and the platform refuses the next call while one is in flight — the one thing the old
-     * app got exactly right and this one left out (TimeLapse {@code ShootActivity.java:364}). Then the
-     * next frame is armed <em>before</em> any bookkeeping, so whatever the panel or the card does next
-     * cannot make the following frame late.
-     *
-     * @param reported whether the camera's own callback brought us here, rather than the timeout.
+     * <p>The next frame is armed <em>before</em> any bookkeeping, so whatever the panel or the card does
+     * next cannot make the following frame late.
      */
-    private void frameTaken(boolean reported) {
-        camera.cancel();
-        if (reported) {
-            callbacks++;
-            if (firedAtMs > 0) callbackMsTotal += now() - firedAtMs;
-        }
+    private void frameTaken() {
         // Taken, and not yet accounted for on the card. This is the state every frame starts in: the
         // count that proves it is written comes back from the worker thread a good part of an interval
         // from now, because a file that is written after the shutter is not there the instant the
@@ -685,7 +719,12 @@ public class MainActivity extends Activity {
                 panel.move(-1);
                 return true;
             case Keys.K_DOWN:
-                panel.move(1);
+                // Held, the down key switches the rehearsal mode on and off. The zoom lever was bound to
+                // it first and this body never delivers that key to an app — a mode nobody can reach is
+                // a mode that does not exist, and one with a working camera cannot test the timetable
+                // without it.
+                if (down.down(repeat) == Keys.Hold.ARM) handler.postDelayed(onDownHold, Keys.HOLD_MS);
+                if (repeat == 0) panel.move(1);
                 return true;
             case Keys.K_LEFT:
                 panel.adjust(-1);
@@ -694,8 +733,9 @@ public class MainActivity extends Activity {
                 panel.adjust(1);
                 return true;
             case Keys.K_DEMO:
-                // The zoom lever, unbound everywhere else, is the dry-run switch: the one way to see
-                // the whole panel on a body whose camera will not open.
+                // The zoom lever, kept as a second way in. It is a camera control, and the body does not
+                // pass it to the app — this is here for a body that does. The down key is the one that
+                // works (see onDownHold).
                 if (repeat == 0) {
                     panel.setDryRun(!panel.isDryRun());
                     panel.setCameraNote(panel.isDryRun()
@@ -727,6 +767,10 @@ public class MainActivity extends Activity {
         if (Keys.swallowed(scan)) return true;
 
         switch (scan) {
+            case Keys.K_DOWN:
+                handler.removeCallbacks(onDownHold);
+                down.up();
+                return true;
             case Keys.K_ENTER:
                 handler.removeCallbacks(onCentreHold);
                 if (centre.up() == Keys.Hold.SHORT) {
@@ -759,6 +803,39 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Down held: the rehearsal mode.
+     *
+     * <p>Only from idle: a mode that can change under a running shoot is a mode that can ruin one. In
+     * rehearsal the engine, the timetable and the panel all run exactly as they do for real, and the
+     * shutter is never touched — which is the only way to tell "my scheduling is wrong" from "the camera
+     * is slower than the interval", and the two need completely different fixes.
+     */
+    private final Runnable onDownHold = new Runnable() {
+        @Override
+        public void run() {
+            if (down.fire() != Keys.Hold.HOLD) return;
+            if (engine.running()) return;
+            boolean rehearsal = !panel.isDryRun();
+            panel.setDryRun(rehearsal);
+            // A rehearsal that sounds like a shoot is not a rehearsal: the shutter is the one thing
+            // everyone in the room hears, and a rehearsal is exactly when nobody expects it. Silent
+            // shutter is measured working on this body, so rehearsal switches it on — as a default, not
+            // a lock: the row stays editable, and leaving rehearsal puts the user's own answer back.
+            if (rehearsal) {
+                silentBeforeRehearsal = engine.plan().get(Plan.ROW_SILENT);
+                engine.plan().set(Plan.ROW_SILENT, 1);
+                if (camera.isOpen()) camera.setSilentShutter(true);
+            } else {
+                engine.plan().set(Plan.ROW_SILENT, silentBeforeRehearsal);
+            }
+            panel.setCameraNote(rehearsal
+                    ? "\u6f14\u7ec3\u6a21\u5f0f\uff1a\u4e0d\u52a8\u76f8\u673a\u3001\u9759\u97f3\u5feb\u95e8\u5f00"  // 演练模式：不动相机、静音快门开
+                    : "\u6f14\u7ec3\u6a21\u5f0f\u5df2\u5173");                                     // 演练模式已关
+            panel.invalidate();
+        }
+    };
+
     /** Centre held: mark this frame. Not bound yet, and saying so beats pretending. */
     private final Runnable onCentreHold = new Runnable() {
         @Override
@@ -782,7 +859,7 @@ public class MainActivity extends Activity {
             if (!engine.running()) return;
             engine.stop(Engine.FAULT_ABORTED, now());
             handler.removeCallbacks(onTick);
-            handler.removeCallbacks(onCallbackTimeout);
+            handler.removeCallbacks(onRelease);
             handler.removeCallbacks(onRetryFire);
             handler.removeCallbacks(onVerdict);
             panel.setCameraNote("\u5df2\u505c\u6b62\uff1a\u5df2\u62cd " + engine.landed() + " \u5f20");  // 已停止：已拍 N 张

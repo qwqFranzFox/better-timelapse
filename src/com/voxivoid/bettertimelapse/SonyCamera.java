@@ -44,6 +44,17 @@ public final class SonyCamera {
     private Object shutterListener;
     private String lastError = "";
 
+    /**
+     * The preview surface, and whether the preview is running.
+     *
+     * <p>A capture on this platform needs a live preview stream, and this app draws its whole UI on a
+     * Canvas with no preview at all. The stream is not for the user to look at — the panel covers it —
+     * but the body will not take a photograph without one.
+     */
+    private android.view.SurfaceHolder holder;
+    private boolean previewing;
+    private String previewProblem = "";
+
     // ---------------------------------------------------------------- capabilities, asked not guessed
     /**
      * What this body reports about itself. Every field is optional: {@code null} means the camera
@@ -60,7 +71,7 @@ public final class SonyCamera {
         /** Why the parameter modifier is missing, or empty. */
         public String modifierProblem = "";
 
-        public String summary() {
+        public String summary(boolean preview) {
             StringBuilder b = new StringBuilder();
             b.append(model.length() > 0 ? model : "?");
             if (platform.length() > 0) b.append(" / ").append(platform);
@@ -68,6 +79,7 @@ public final class SonyCamera {
             b.append(" drive=").append(tri(driveMode));
             b.append(" ael=").append(tri(autoExposureLock));
             b.append(" burst=").append(tri(burstTakePicture));
+            b.append(" preview=").append(preview ? "yes" : "no");
             if (modifierProblem.length() > 0) b.append(" modifier=").append(modifierProblem);
             return b.toString();
         }
@@ -100,6 +112,9 @@ public final class SonyCamera {
             }
             modifier = createModifier();
             lastError = "";
+            // A surface that arrived before the camera was open is attached now; one that arrives later
+            // comes in through attachPreview().
+            if (holder != null) attachPreview(holder);
             return true;
         } catch (Throwable t) {
             lastError = shortName(t);
@@ -139,14 +154,23 @@ public final class SonyCamera {
 
     // ---------------------------------------------------------------- the shutter
     /**
-     * Take one frame. Returns false when the call itself failed, which is the only honest signal the
-     * platform gives: {@code burstableTakePicture} returns void, so a frame that the camera accepts
-     * and then drops on the floor is caught later by {@link Frames}, not here.
+     * The press: hand the capture to the camera.
+     *
+     * <p>{@code Camera.takePicture} rather than {@code CameraEx.burstableTakePicture}, because that is
+     * what the one app known to shoot frames on this body uses — Recipe Lab's sample run, 77 frames on
+     * an ILCE-6001 with firmware 3.21 ({@code MainActivity.java:566}). The burstable call is refused
+     * here ("BurstableTakePicture failed"), and the platform's own idiom is a press and a release:
+     * {@code takePicture}, then a couple of seconds later {@code cancelTakePicture} — Recipe Lab calls
+     * it "the shutter key's press / release, automated" ({@code DEVELOPMENT.md}).
+     *
+     * <p>All three callbacks are null on purpose: the camera writes the file itself, and this app does
+     * not want the JPEG bytes — the card is how it knows whether the frame arrived.
      */
     public boolean fire() {
-        if (cameraEx == null) return false;
+        if (camera == null) return false;
         try {
-            cameraEx.getClass().getMethod("burstableTakePicture").invoke(cameraEx);
+            camera.takePicture(null, null, null);
+            lastError = "";
             return true;
         } catch (Throwable t) {
             lastError = shortName(t);
@@ -154,14 +178,68 @@ public final class SonyCamera {
         }
     }
 
-    /** Abandon the frame in flight. Called on the way out of a shot and on release. */
-    public void cancel() {
-        if (cameraEx == null) return;
-        try {
-            cameraEx.getClass().getMethod("cancelTakePicture").invoke(cameraEx);
-        } catch (Throwable t) {
-            // A body without the call keeps the frame; nothing to report.
+    /**
+     * The release: {@code cancelTakePicture}, then the preview again.
+     *
+     * <p>Both halves matter. {@code takePicture} holds the shutter until it is cancelled, and a capture
+     * on a plain Android camera leaves the preview stopped — "nothing is applied to a stopped preview"
+     * (Recipe Lab {@code resumePreview}), so the next frame would be refused, or taken with whatever
+     * settings were live before it started.
+     */
+    public void release() {
+        if (cameraEx != null) {
+            try {
+                cameraEx.getClass().getMethod("cancelTakePicture").invoke(cameraEx);
+            } catch (Throwable t) {
+                // A body without the call keeps the frame; nothing to report.
+            }
         }
+        resumePreview();
+    }
+
+    /** Start the preview again. Silent: a body that restarts it by itself simply does not need this. */
+    public void resumePreview() {
+        if (camera == null || holder == null) return;
+        try {
+            camera.startPreview();
+            previewing = true;
+            previewProblem = "";
+        } catch (Throwable t) {
+            previewing = false;
+            previewProblem = shortName(t);
+        }
+    }
+
+    /**
+     * Hand the camera a preview surface.
+     *
+     * <p>Called when the surface is created, which is usually before the camera is open, so the holder
+     * is kept and the work is done whichever way round the two happen.
+     */
+    public boolean attachPreview(android.view.SurfaceHolder surface) {
+        holder = surface;
+        if (camera == null) return false;
+        try {
+            camera.setPreviewDisplay(surface);
+            camera.startPreview();
+            previewing = true;
+            previewProblem = "";
+            return true;
+        } catch (Throwable t) {
+            previewing = false;
+            previewProblem = shortName(t);
+            lastError = previewProblem;
+            return false;
+        }
+    }
+
+    /** Why the preview is not running, or empty. Without one, a capture is refused. */
+    public String previewProblem() {
+        return previewProblem;
+    }
+
+    public boolean previewing() {
+        return previewing;
     }
 
     /**

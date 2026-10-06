@@ -38,7 +38,7 @@ say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 # Only the surface this app uses, with the real signatures. A stub that is easier than the platform
 # is a stub that hides a bug.
 write_stubs() {
-    mkdir -p "$STUBS"/android/{app,content,content/res,hardware,os,graphics,view} \
+    mkdir -p "$STUBS"/android/{app,content,content/res,hardware,os,graphics,view,widget} \
              "$STUBS"/com/sony/scalar/sysutil "$STUBS"/$APP_PACKAGE_PATH
 
     cat > "$STUBS/android/content/Context.java" <<'EOF'
@@ -240,9 +240,51 @@ public class KeyEvent {
     public int getRepeatCount() { return 0; }
 }
 EOF
+    # The preview surface the capture needs. The app hands this to Camera.setPreviewDisplay, so the
+    # stub carries the callback interface and the type constant the shell adds.
     cat > "$STUBS/android/view/SurfaceHolder.java" <<'EOF'
 package android.view;
-public interface SurfaceHolder { }
+public interface SurfaceHolder {
+    int SURFACE_TYPE_PUSH_BUFFERS = 3;
+    void setType(int type);
+    void addCallback(Callback cb);
+    interface Callback {
+        void surfaceCreated(SurfaceHolder holder);
+        void surfaceChanged(SurfaceHolder holder, int format, int width, int height);
+        void surfaceDestroyed(SurfaceHolder holder);
+    }
+}
+EOF
+    cat > "$STUBS/android/view/SurfaceView.java" <<'EOF'
+package android.view;
+import android.content.Context;
+public class SurfaceView extends View {
+    public SurfaceView(Context c) { super(c); }
+    public SurfaceHolder getHolder() { return null; }
+}
+EOF
+    cat > "$STUBS/android/view/ViewGroup.java" <<'EOF'
+package android.view;
+import android.content.Context;
+public class ViewGroup extends View {
+    public ViewGroup(Context c) { super(c); }
+    public void addView(View child, LayoutParams params) { }
+    public static class LayoutParams {
+        public static final int MATCH_PARENT = -1;
+        public LayoutParams(int width, int height) { }
+    }
+}
+EOF
+    cat > "$STUBS/android/widget/FrameLayout.java" <<'EOF'
+package android.widget;
+import android.content.Context;
+import android.view.ViewGroup;
+public class FrameLayout extends ViewGroup {
+    public FrameLayout(Context c) { super(c); }
+    public static class LayoutParams extends ViewGroup.LayoutParams {
+        public LayoutParams(int width, int height) { super(width, height); }
+    }
+}
 EOF
     cat > "$STUBS/com/sony/scalar/sysutil/ScalarProperties.java" <<'EOF'
 package com.sony.scalar.sysutil;

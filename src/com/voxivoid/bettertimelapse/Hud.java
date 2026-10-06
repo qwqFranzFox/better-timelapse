@@ -284,11 +284,12 @@ public final class Hud {
                 + "\u6eda\u8f6e \u5fae\u8c03   "                  // 滚轮 微调
                 + "\u2191\u2193 \u6362\u884c   "                  // ↑↓ 换行
                 + "\u4e2d\u5fc3 \u5f00\u59cb   "                  // 中心 开始
-                + "TRASH \u6682\u505c";                          // TRASH 暂停
+                + "TRASH \u6682\u505c   "                        // TRASH 暂停
+                + "\u957f\u6309\u2193 \u6f14\u7ec3";                  // 长按↓ 演练
     }
 
     /** Shown once under the legend while the demo key is what drives the screen. */
     public static String demoLegend() {
-        return "\u6f14\u793a\uff1a\u53d8\u7126\u6746\u5207\u6362\u72b6\u6001";   // 演示：变焦杆切换状态
+        return "\u6f14\u7ec3\uff1a\u53ea\u8dd1\u65f6\u523b\u8868\uff0c\u4e0d\u52a8\u76f8\u673a";   // 演练：只跑时刻表，不动相机
     }
 }

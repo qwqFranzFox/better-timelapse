@@ -41,20 +41,6 @@ public final class Frames {
     }
 
     /**
-     * How long to wait for the camera's own shutter callback before carrying on without it.
-     *
-     * <p>Not a verdict on the frame — the card is what decides that — but the release valve for the
-     * state machine, which cannot fire the next frame while it believes one is in flight. Half the
-     * interval, so a callback that never comes costs at most half a frame's spacing; never less than
-     * {@value #CALLBACK_FLOOR_MS} ms, because a body that takes most of a second to report a frame is
-     * still working, and never more than {@value #CALLBACK_CEIL_MS} ms, because past that the interval
-     * itself is the smaller number and waiting longer would move the next frame.
-     */
-    public static long callbackTimeoutMs(Plan plan) {
-        return clamp(plan.intervalMs() / 2, CALLBACK_FLOOR_MS, CALLBACK_CEIL_MS);
-    }
-
-    /**
      * When to look at the card for the frame that has just been taken.
      *
      * <p>Deliberately not immediately. The file is written <em>after</em> the shutter, so a walk taken
@@ -78,8 +64,38 @@ public final class Frames {
         return value < low ? low : (value > high ? high : value);
     }
 
-    private static final long CALLBACK_FLOOR_MS = 800, CALLBACK_CEIL_MS = 2500;
     private static final long VERDICT_FLOOR_MS = 500, VERDICT_CEIL_MS = 5000;
+
+    /**
+     * How long this platform wants between the shutter's press and its release.
+     *
+     * <p>2500 ms, and it is measured rather than invented: it is {@code DevTools.SHUTTER_MS} in Recipe
+     * Lab, whose sample run shot 77 frames on this body (ILCE-6001, firmware 3.21) with a
+     * {@code takePicture} / {@code cancelTakePicture} pair that far apart. It is the single number that
+     * decides whether a given interval is possible at all: press and release cannot overlap, so nothing
+     * shorter than this can be shot on this body, whatever the plan says.
+     */
+    public static final long PRESS_MS = 2500;
+
+    /** Kept clear between the release and the next press: the body is not instantly ready again. */
+    public static final long RELEASE_MARGIN_MS = 400;
+
+    /** The shortest interval this body can be asked for, from its own press/release window. */
+    public static long shortestIntervalMs() {
+        return PRESS_MS + RELEASE_MARGIN_MS;
+    }
+
+    /**
+     * How long the shutter is held: the body's press window, shortened when the interval cannot afford
+     * it. Shortening it is a compromise, not a fix — a release before the body has finished is exactly
+     * how a frame comes out wrong — which is why {@link #shortestIntervalMs} is shown to the user
+     * rather than applied quietly.
+     */
+    public static long pressWindowMs(Plan plan) {
+        return clamp(plan.intervalMs() - RELEASE_MARGIN_MS, PRESS_FLOOR_MS, PRESS_MS);
+    }
+
+    private static final long PRESS_FLOOR_MS = 600;
 
     /**
      * Frames the card can still take, from the free space and a measured frame size. A floor, and

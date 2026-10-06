@@ -79,7 +79,8 @@ Camera camera = (Camera) cx.getMethod("getNormalCamera").invoke(cameraEx);
 | 机型与平台：`ScalarProperties.getString("model.name")` / `getString("version.platform")` | 【实测·skill】 |
 | 某个键是否存在：`ScalarInput.getKeyStatus(scan).valid`；是否按下：同一次调用的 `.status` | 【实测·skill】（标注：skill 说「尚未在相机上验证」） |
 | 支持性探测：`ParametersModifier.isSupportedSilentShutterMode()`；否则 `setSilentShutterMode()` 会 `NoSuchMethodError` | 【上游源码；recipe-lab 记录 `setSilentShutterMode` 不是所有机身都有】 |
-| **`burstableTakePicture()` 与 `cancelTakePicture()` 是一对**：前者把快门按住（名字是字面意思），后者放开。不在每次快门回调里 `cancel`，下一次 `burstableTakePicture()` 会被拒绝（反射抛出，`InvocationTargetException` 里裹着平台自己的异常） | 【实测·本机】+【上游源码：老 app 每次 `onShutter` 都无条件 `cancelTakePicture()`，TimeLapse `ShootActivity.java:364`】 |
+| **拍摄是「按下 / 放开」一对，而且必须有活跃预览流**：`Camera.takePicture(null,null,null)`（按下）→ 约 **2500ms** → `CameraEx.cancelTakePicture()` + `Camera.startPreview()`（放开）。没有预览流时 `CameraEx.burstableTakePicture()` 会被拒，真机报 **`BurstableTakePicture failed`**（第一张之后必现） | 【实测·本机】+【recipe-lab 实测：`DevTools.SHUTTER_MS = 2500`，sample run 在 ILCE-6001 / 固件 v3.21 上拍成 77 张；`MainActivity.java:88` 的 `runNext = cancelCapture(); resumePreview();`，`:201` 的 `surfaceCreated = setPreviewDisplay + startPreview`】 |
+| 因此**这台机身的每张最小周期 ≈ 2.5s（按住窗口）+ 0.4s（放开到下一次按下的余量）= 2.9s**：「间隔 2s」在这台机身上物理做不到，不是排程写法问题 | 【实测·本机（2s 间隔下必被拒）】+【recipe-lab 的常量】 |
 | `ParametersModifier` 被调用的方法名（`setFocusMode` / `setDriveMode` / `setBurstDriveSpeed` / `setBurstDriveButtonReleaseBehave` / `setSilentShutterMode` / `setAutoExposureLock` / `setBracketMode` / `setExposureBracketMode` / `setExposureBracketPeriod` / `setNumOfBracketPicture`，以及常量 `DRIVE_MODE_*` / `AE_LOCK_ON` / `BRACKET_MODE_EXPOSURE` / `EXPOSURE_BRACKET_MODE_SINGLE`） | 【未验证】—— 这些名字来自老 app 的编译期依赖（TimeLapse 的 `app/build.gradle` 里那个已死的 `-SNAPSHOT` stub），**需要真机反射验证** |
 
 ### 4.1 实时预览参数（Sony 的参数字符串）
@@ -171,6 +172,11 @@ pmca-console.py bk lock / unlock     # 只读保护开关
 ---
 
 ## 6. 按键扫描码（Sony `ScalarInput` 的名字）
+
+| 事实 | 来源 |
+|---|---|
+| **变焦杆不会送到 app**：绑定变焦杆做「演练模式」开关，真机上按了毫无反应（面板没有切换、也没有报错）。面板可用的按键只有方向键、滚轮、中心、TRASH、MENU —— 模式切换必须绑在这些上面（现绑「长按 ↓」） | 【实测·本机】 |
+
 
 | 控件 | 扫描码 | 来源 |
 |---|---|---|
