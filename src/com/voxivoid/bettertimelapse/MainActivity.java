@@ -43,9 +43,6 @@ public class MainActivity extends Activity {
     /** How often the device status (battery, card) is re-read. Both change over minutes. */
     private static final long DEVICE_MS = 5000;
 
-    /** The watchdog period while a frame is in flight. */
-    private static final long LAND_CHECK_MS = 400;
-
     /**
      * How many times a refused shutter call is retried, and how long between attempts.
      *
@@ -56,9 +53,6 @@ public class MainActivity extends Activity {
      */
     private static final int FIRE_ATTEMPTS = 4;
     private static final long FIRE_RETRY_MS = 500;
-
-    /** How long a frame may take to appear on the card before it counts as lost. */
-    private static final long LAND_TIMEOUT_MS = Frames.LAND_TIMEOUT_MS;
 
     /** Fallback frame size for the card estimate, until one can be measured off the card. */
     private static final long FALLBACK_FRAME_BYTES = 6L * 1024 * 1024;
@@ -76,21 +70,43 @@ public class MainActivity extends Activity {
     /** Set once the startup work has been queued, so it happens on the first resume only. */
     private boolean started;
 
-    /** Files on the card when the current frame was fired; the difference is the frame. */
-    private int cardAtFire = Frames.UNKNOWN;
+    /** When the current frame was handed to the camera, for the callback latency. */
     private long firedAtMs;
 
     /** Attempts at the frame currently due; cleared by a call the camera accepted. */
     private int fireAttempts;
 
+    // ---------------------------------------------------------------- what the worker read
     /**
-     * A frame the camera reported whose file the card has not accounted for yet.
+     * The card as of the last completed walk.
      *
-     * <p>One slot, because one frame is in flight at a time: the file it wrote is looked for again when
-     * the next frame fires. A card slower than that is reported as unconfirmed, which is true.
+     * <p>Published copies, not the {@code Card} object: the walk happens on a worker thread and this is
+     * the hand-off, so nothing on the UI thread — including {@link #fire()} — ever reads a half-updated
+     * Card. The count used at a frame's due moment is one of these, and being up to one interval old
+     * is exactly what the outstanding-frames count is for.
      */
-    private boolean pendingOpen;
-    private int pendingAt = Frames.UNKNOWN;
+    private int cardCount = Frames.UNKNOWN;
+    private boolean cardReadable;
+    private String cardNewest = "";
+    private long cardNewestStamp;
+    private String cardNewestPath = "";
+    private long cardNewestBytes;
+    private String cardRoots = "";
+
+    /** The count as of the previous walk: the difference between the two is what the card gained. */
+    private int lastWalkCount = Frames.UNKNOWN;
+    private int lastGained;
+
+    /** True while a worker is walking the card, so two walks cannot read over each other. */
+    private boolean walking;
+    private long walkMs;
+
+    /** Whether the card was ever readable this session, so losing it can be told from never having it. */
+    private boolean sawCard;
+
+    /** Frames the camera's own callback brought back, and the total time they took to arrive. */
+    private int callbacks;
+    private long callbackMsTotal;
 
     private long measuredFrameBytes;
 
@@ -166,8 +182,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         handler.removeCallbacks(onTick);
-        handler.removeCallbacks(onCheckLanding);
+        handler.removeCallbacks(onCallbackTimeout);
         handler.removeCallbacks(onRetryFire);
+        handler.removeCallbacks(onVerdict);
         handler.removeCallbacks(onDevice);
         // Clear every hold: a release that lands while the app is not looking must not leave a key
         // stuck down, which is the failure that makes a camera app look broken.
@@ -223,11 +240,11 @@ public class MainActivity extends Activity {
     private final Runnable onFirstCardRead = new Runnable() {
         @Override
         public void run() {
-            card.refresh();
+            // The first walk is the baseline every later count is measured against, and it also goes
+            // through the worker thread: one path for reading the card means the one place where the
+            // Card object is touched is the same place every time.
+            walkCard();
             pushDeviceStatus();
-            // Which roots hold the camera's files, and how many each holds. Read once, kept on screen:
-            // "the app cannot see the card" is a statement that needs the list behind it.
-            panel.setRoots("\u5361\u6839 " + card.rootsReport());                              // 卡根
         }
     };
 
@@ -290,6 +307,25 @@ public class MainActivity extends Activity {
     // ================================================================ the loop
 
     /**
+     * Say so, before the run starts, when the plan asks for more than the camera can do.
+     *
+     * <p>The interval is a promise about the clock, and the settle delay is this plan's own estimate of
+     * how long the body needs after a frame before it can take the next one. If the interval is shorter
+     * than that, no amount of care in this app will produce it — the camera sets the pace, every frame
+     * comes late, and the honest thing is to say it on screen before the shutter is pressed rather than
+     * to let the user find out from a finished film (docs/PLAN.md §4.3). The app does not silently
+     * stretch the interval to cover it: that would be the old app's failure, a number on screen that is
+     * not the number being shot.
+     */
+    private void warnIfImpossible() {
+        Plan plan = engine.plan();
+        if (plan.intervalMs() >= plan.settleMs()) return;
+        panel.setEvidence("\u95f4\u9694 " + Steps.shortMs(plan.intervalMs())                // 间隔
+                + " \u6bd4\u7a33\u5b9a\u5ef6\u65f6 " + Steps.shortMs(plan.settleMs())        // 比稳定延时
+                + " \u77ed\uff1a\u76f8\u673a\u53ef\u80fd\u8ddf\u4e0d\u4e0a");                 // 短：相机可能跟不上
+    }
+
+    /**
      * The only place the engine is stepped, and the only place timers are posted.
      *
      * <p>It carries out whatever single {@code ACT_*} the engine returns, and nothing else — which is
@@ -327,7 +363,15 @@ public class MainActivity extends Activity {
     };
 
     /**
-     * Hand one frame to the camera, then watch the card for it.
+     * Hand one frame to the camera.
+     *
+     * <p>Nothing slow happens in here, and that is the whole point of the way this is now arranged.
+     * The frame's due moment is a fact about the clock, and everything between that moment and the
+     * shutter call is time the frame is late by. A directory walk over a card holding a few hundred
+     * files takes long enough to be visible in the finished film — two of them per frame, on the UI
+     * thread, put the app's own bookkeeping in charge of the interval. The card is read on a worker
+     * thread instead, after the frame's file has had time to appear, and the count used here is the
+     * last one that came back.
      *
      * <p>A dry run takes the same path through the engine and never touches the camera, so the whole
      * panel and state machine can be exercised on a body whose camera will not open.
@@ -339,18 +383,6 @@ public class MainActivity extends Activity {
             return;
         }
         if (!engine.canFire()) return;
-        card.refresh();
-        int nowCount = card.count();
-        // Settle the previous frame's open question first: its file has had a whole interval to appear,
-        // which is longer than the window the watchdog can afford without holding up the next frame.
-        // The immediate check below is made a fraction of a second after the shutter callback, when a
-        // card that takes a second to write has not written anything yet — so "the count did not move"
-        // there means "not yet", and this is where "yet" is answered.
-        if (pendingOpen) {
-            pendingOpen = false;
-            if (Frames.frameArrived(pendingAt, nowCount, engine.plan())) engine.accountFor();
-        }
-        cardAtFire = nowCount;
         firedAtMs = now();
 
         if (!camera.isOpen() && !camera.open()) {
@@ -383,8 +415,8 @@ public class MainActivity extends Activity {
             return;
         }
         fireAttempts = 0;
-        handler.removeCallbacks(onCheckLanding);
-        handler.postDelayed(onCheckLanding, LAND_CHECK_MS);
+        handler.removeCallbacks(onCallbackTimeout);
+        handler.postDelayed(onCallbackTimeout, Frames.callbackTimeoutMs(engine.plan()));
     }
 
     /**
@@ -401,124 +433,172 @@ public class MainActivity extends Activity {
     };
 
     /**
-     * The watchdog: how the card is consulted, and what happens when it cannot be.
+     * The camera never reported the frame.
      *
-     * <p>The camera's shutter callback is the primary evidence that a frame was taken. The card count
-     * is corroboration, and corroboration that is <em>missing</em> is not evidence of absence: this
-     * app cannot always see the camera's files at all, and treating "the count did not move" as "the
-     * frame was lost" told the user every single frame had failed to write while the frames were
-     * arriving perfectly well. A missing measurement was read as a negative one.
-     *
-     * <p>So three outcomes, and they are different things:
-     *
-     * <ul>
-     *   <li>the count moved — the frame is confirmed;</li>
-     *   <li>the count is unavailable — the frame counts as taken and is reported as unconfirmed;</li>
-     *   <li>the card went from readable to unreadable — a fault, because retrying cannot help.</li>
-     * </ul>
-     *
-     * <p>Every outcome goes through {@link #settleFrame}, so the verdict and the numbers behind it are
-     * written in one place. Splitting them meant the watchdog's verdict never reached the numbers line,
-     * and the screen showed a stale one from the last shutter call instead.
+     * <p>It still counts as taken — the call was accepted, and the card is what decides whether
+     * anything was written — but the machine has to let go of the frame, or the next one cannot be
+     * fired at its own due moment and one missing callback would cost the run its cadence.
      */
-    private final Runnable onCheckLanding = new Runnable() {
+    private final Runnable onCallbackTimeout = new Runnable() {
         @Override
         public void run() {
-            if (engine.state() != Engine.EXPOSING) return;      // the shutter callback got there first
-            card.refresh();
-            if (Frames.frameArrived(cardAtFire, card.count(), engine.plan())) {
-                settleFrame(true);
-                return;
-            }
-            if (cardAtFire == Frames.UNKNOWN || !card.readable()) {
-                // The app cannot see the camera's files at all, so it has no evidence either way. That
-                // is not a reason to fail the run: the frame counts as taken and unconfirmed, which is
-                // what it is. Failing here told the user nothing except that the app gave up.
-                settleFrame(false);
-                return;
-            }
-            if (now() - firedAtMs >= LAND_TIMEOUT_MS) {
-                // The file never showed up in the time a write takes. The camera did report the frame,
-                // so it counts — as unconfirmed, which is what it is.
-                settleFrame(false);
-                return;
-            }
-            handler.postDelayed(this, LAND_CHECK_MS);
+            if (engine.state() != Engine.EXPOSING) return;
+            frameTaken(false);
         }
     };
 
     /**
      * The shutter callback: the body says a frame was taken.
      *
-     * <p>It does not advance the run on its own. The card is read first, so a camera that reports a
-     * frame it never wrote cannot make the app count it.
+     * <p>It reports a frame, and that is all it is taken for. The card has the last word, later, on a
+     * worker thread — a camera that reports a frame it never wrote cannot make the app claim it was
+     * written.
      */
     private final SonyCamera.ShutterEvents onShutter = new SonyCamera.ShutterEvents() {
         @Override
         public void onShutter() {
-            // The platform calls this from its own thread, and the engine, the card walk and the panel
-            // all belong to the UI thread. Hopping across also serialises the callback against the
-            // watchdog — the pending check is cancelled and the frame settled as one step — so the two
-            // cannot both count the same frame.
+            // The platform calls this from its own thread; the engine, the panel and the counters all
+            // belong to the UI thread. Hopping across also serialises the callback against the timeout,
+            // so the two cannot both count the same frame.
             handler.post(onFrameTaken);
         }
     };
 
-    /** The frame the camera reported, settled on the UI thread. */
     private final Runnable onFrameTaken = new Runnable() {
         @Override
         public void run() {
-            handler.removeCallbacks(onCheckLanding);
-            if (engine.state() != Engine.EXPOSING) return;      // the watchdog got there first
-            // The camera reported the frame; that is enough to count it. The card is read to confirm,
-            // never to contradict: a count this app cannot see is not a missing frame.
-            card.refresh();
-            settleFrame(Frames.frameArrived(cardAtFire, card.count(), engine.plan()));
+            handler.removeCallbacks(onCallbackTimeout);
+            if (engine.state() != Engine.EXPOSING) return;      // the timeout got there first
+            frameTaken(true);
         }
     };
 
     /**
-     * Record the frame as landed and carry on: the engine decides what happens next.
+     * End the frame: count it, arm the next one, and leave the card to answer later.
      *
-     * @param confirmed whether the card count corroborated the frame. Unconfirmed is not failed, and
-     *                  the engine keeps the two apart so the panel can say "taken, not confirmed"
-     *                  rather than claiming a loss it cannot see.
+     * <p>Two things happen in a fixed order, and both are about time. The capture is cancelled first,
+     * because {@code burstableTakePicture} holds the shutter open until {@code cancelTakePicture}
+     * closes it and the platform refuses the next call while one is in flight — the one thing the old
+     * app got exactly right and this one left out (TimeLapse {@code ShootActivity.java:364}). Then the
+     * next frame is armed <em>before</em> any bookkeeping, so whatever the panel or the card does next
+     * cannot make the following frame late.
+     *
+     * @param reported whether the camera's own callback brought us here, rather than the timeout.
      */
-    private void settleFrame(boolean confirmed) {
-        // End the capture before anything else. `burstableTakePicture` holds the shutter open — the
-        // name is literal — and the platform refuses the next call while one is in flight. This is the
-        // one thing the old app got exactly right and this one left out: TimeLapse calls
-        // `cancelTakePicture()` from its own shutter callback on every frame
-        // (TimeLapse ShootActivity.java:364). Without it the first frame is taken, and every call after
-        // it is refused — which is precisely the run that stopped after one photograph.
+    private void frameTaken(boolean reported) {
         camera.cancel();
-        if (confirmed) {
-            if (card.newestStamp() > 0) measuredFrameBytes = card.estimatedFrameBytes();
-            engine.setLastFile(card.newestName());
-            engine.step(Engine.EV_SHUTTER, now());
-            pendingOpen = false;
-        } else {
-            engine.step(Engine.EV_UNVERIFIED, now());
-            // Left open on purpose: the count is taken again when the next frame fires, and this frame
-            // stops being "unconfirmed" the moment its file turns up.
-            pendingOpen = true;
-            pendingAt = cardAtFire;
+        if (reported) {
+            callbacks++;
+            if (firedAtMs > 0) callbackMsTotal += now() - firedAtMs;
         }
-        // Raw numbers, not a verdict: how many files the card gained against what one frame of this
-        // plan is expected to produce, and where the newest file on the card actually is. "One press,
-        // N frames lost" is not diagnosable without them, and a count that never moves is either a
-        // camera writing somewhere else or a walk looking in the wrong place — the path tells those two
-        // apart, which no number of re-runs of the same build would have.
-        card.refresh();
-        panel.setRoots("\u5361\u6839 " + card.rootsReport() + "  " + newestLine());            // 卡根
-        int gained = Frames.arrived(cardAtFire, card.count());
-        panel.setNumbers("\u5361\u589e " + gained + " \u6587\u4ef6"
-                + "  \u671f\u671b " + Frames.filesPerFrame(engine.plan())
-                + "  \u843d\u76d8 " + engine.landed()
-                + "  \u672a\u6838\u5b9e " + engine.unverified()
-                + "  \u5361 " + (card.count() == Frames.UNKNOWN ? "?" : String.valueOf(card.count())));
-        panel.invalidate();
+        // Taken, and not yet accounted for on the card. This is the state every frame starts in: the
+        // count that proves it is written comes back from the worker thread a good part of an interval
+        // from now, because a file that is written after the shutter is not there the instant the
+        // camera reports the frame.
+        engine.step(Engine.EV_UNVERIFIED, now());
         pump();
+        handler.removeCallbacks(onVerdict);
+        handler.postDelayed(onVerdict, Frames.verdictDelayMs(engine.plan()));
+    }
+
+    // ================================================================ the card, off the UI thread
+
+    /**
+     * Walk the card on a worker thread and come back to the UI thread with the answer.
+     *
+     * <p>The walk is the app's only slow operation: a few hundred {@code stat} calls through the
+     * camera's storage stack. On the UI thread it delays whatever is waiting behind it — including the
+     * timer for the next frame — so it does not run there. Two walks cannot overlap; a card slow enough
+     * to still be walking when the next one is due simply gets read less often, and the frames stay
+     * unaccounted for until it answers, which is the truth about them.
+     */
+    private void walkCard() {
+        if (walking) return;
+        walking = true;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                long beganMs = now();
+                card.refresh();
+                walkMs = now() - beganMs;
+                // The hand-off. Card is written by this thread and read by the UI thread only after
+                // this post: the message queue is the memory barrier between the two.
+                handler.post(onCardRead);
+            }
+        }, "card-walk").start();
+    }
+
+    private final Runnable onCardRead = new Runnable() {
+        @Override
+        public void run() {
+            walking = false;
+            // Publish what was read, so nothing outside this handler ever touches the Card object.
+            cardCount = card.count();
+            cardReadable = card.readable();
+            cardNewest = card.newestName();
+            cardNewestStamp = card.newestStamp();
+            cardNewestPath = card.newestPath();
+            cardNewestBytes = card.newestBytes();
+            cardRoots = card.rootsReport();
+
+            if (cardCount != Frames.UNKNOWN) sawCard = true;
+            if (cardNewestBytes > 0) measuredFrameBytes = cardNewestBytes;
+            if (!cardReadable && sawCard && engine.running()) {
+                // Readable and then not: retrying cannot help, and the frames from here on have no
+                // witness at all. This is the one card condition that stops a run (docs/DECISIONS.md
+                // A18).
+                engine.stop(Engine.FAULT_CARD, now());
+                panel.setEvidence("\u5b58\u50a8\u5361\u8bfb\u4e0d\u5230\u4e86");              // 存储卡读不到了
+            }
+            accountForFrames();
+            if (lastGained > 0) engine.setLastFile(cardNewest);
+            pushCardLines();
+            panel.invalidate();
+        }
+    };
+
+    /**
+     * Let the card answer for the frames it has not answered for yet.
+     *
+     * <p>The count moved by so many files, and each frame of this plan writes a known number of them,
+     * so that many outstanding frames are accounted for. Nothing is ever un-accounted: a card that
+     * gains nothing leaves the number where it is, which is what "this app cannot see your files"
+     * should look like on screen.
+     */
+    private void accountForFrames() {
+        if (cardCount == Frames.UNKNOWN) return;
+        if (lastWalkCount == Frames.UNKNOWN) {
+            lastWalkCount = cardCount;
+            return;
+        }
+        int gained = cardCount - lastWalkCount;
+        lastWalkCount = cardCount;
+        lastGained = gained;
+        int accounted = Frames.framesAccounted(gained, engine.plan());
+        int open = engine.unverified();
+        if (accounted > open) accounted = open;
+        for (int i = 0; i < accounted; i++) engine.accountFor();
+    }
+
+    /** The card's own lines: where it was read, what it holds, and what it just did. */
+    private void pushCardLines() {
+        panel.setRoots("\u5361\u6839 " + (cardRoots.length() == 0 ? "\u65e0" : cardRoots)   // 卡根 / 无
+                + "  " + newestLine());
+        panel.setNumbers("\u5361\u589e " + lastGained + " \u6587\u4ef6"                     // 卡增
+                + "  \u6838\u5b9e " + confirmed()                                           // 核实
+                + "  \u843d\u76d8 " + engine.landed()                                       // 落盘
+                + "  \u672a\u6838\u5b9e " + engine.unverified()                             // 未核实
+                + "  \u5361 " + (cardCount == Frames.UNKNOWN ? "?" : String.valueOf(cardCount))
+                + "  \u8bfb\u6570 " + walkMs + "ms"                                         // 读数
+                + "  \u56de\u6267 " + callbacks + "/" + engine.landed()                      // 回执
+                + (callbacks > 0 ? " +" + (callbackMsTotal / callbacks) + "ms" : ""));
+    }
+
+    /** Frames the card has answered for: taken, and no longer outstanding. */
+    private int confirmed() {
+        int open = engine.unverified();
+        int landed = engine.landed();
+        return landed > open ? landed - open : 0;
     }
 
     /**
@@ -529,16 +609,30 @@ public class MainActivity extends Activity {
      * the camera is writing somewhere this app is not looking — or not writing at all.
      */
     private String newestLine() {
-        if (card.newestStamp() <= 0) return "\u6700\u65b0 \u65e0";                    // 最新 无
+        if (cardNewestStamp <= 0) return "\u6700\u65b0 \u65e0";                      // 最新 无
         // The path from DCIM down, not just the name: whether the camera files into a roll directory or
         // drops the file straight into DCIM is the difference between "this app was looking in the
         // wrong place" and "the camera writes somewhere else entirely", and only the path says which.
-        String where = card.newestPath();
+        String where = cardNewestPath;
         int dcim = where.indexOf("/DCIM/");
         if (dcim >= 0) where = where.substring(dcim + 1);
         return "\u6700\u65b0 " + where + " "
-                + Hud.age(System.currentTimeMillis() - card.newestStamp()) + "\u524d";  // 最新 <路径> <n>前
+                + Hud.age(System.currentTimeMillis() - cardNewestStamp) + "\u524d";  // 最新 <路径> <n>前
     }
+
+    /**
+     * When the card is read for the frame just taken: once per frame, late in the interval.
+     *
+     * <p>Not immediately. The file is written after the shutter, so a walk taken the instant the camera
+     * reports the frame finds nothing and would call a perfectly good frame unwritten — which is what
+     * it did, on every frame, before this was moved.
+     */
+    private final Runnable onVerdict = new Runnable() {
+        @Override
+        public void run() {
+            walkCard();
+        }
+    };
 
     // ================================================================ device status
 
@@ -552,7 +646,7 @@ public class MainActivity extends Activity {
 
     private void pushDeviceStatus() {
         long perFrame = measuredFrameBytes;
-        if (perFrame <= 0) perFrame = card.estimatedFrameBytes();
+        if (perFrame <= 0) perFrame = cardNewestBytes;
         if (perFrame <= 0) perFrame = FALLBACK_FRAME_BYTES;
         panel.setDeviceStatus(Device.batteryPercent(this), Device.charging(this),
                 Device.freeBytes(), perFrame);
@@ -636,7 +730,10 @@ public class MainActivity extends Activity {
             case Keys.K_ENTER:
                 handler.removeCallbacks(onCentreHold);
                 if (centre.up() == Keys.Hold.SHORT) {
-                    if (engine.state() == Engine.IDLE) applyPlanToCamera();
+                    if (engine.state() == Engine.IDLE) {
+                        applyPlanToCamera();
+                        warnIfImpossible();
+                    }
                     engine.step(Engine.EV_ENTER, now());
                     panel.invalidate();
                     pump();
@@ -647,7 +744,7 @@ public class MainActivity extends Activity {
                 handler.removeCallbacks(onTrashHold);
                 if (trash.up() == Keys.Hold.SHORT) {
                     panel.trash(now());
-                    if (engine.state() == Engine.PAUSED) card.refresh();
+                    if (engine.state() == Engine.PAUSED) walkCard();
                 }
                 return true;
             case Keys.K_MENU:
@@ -685,8 +782,9 @@ public class MainActivity extends Activity {
             if (!engine.running()) return;
             engine.stop(Engine.FAULT_ABORTED, now());
             handler.removeCallbacks(onTick);
-            handler.removeCallbacks(onCheckLanding);
+            handler.removeCallbacks(onCallbackTimeout);
             handler.removeCallbacks(onRetryFire);
+            handler.removeCallbacks(onVerdict);
             panel.setCameraNote("\u5df2\u505c\u6b62\uff1a\u5df2\u62cd " + engine.landed() + " \u5f20");  // 已停止：已拍 N 张
             panel.invalidate();
         }

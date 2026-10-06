@@ -228,7 +228,7 @@ public final class Hud {
         return String.format(Locale.US, "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
     }
 
-    /** The progress line: landed frames against the plan, and how long the run has been going. */
+    /** The progress line: frames taken against the plan, and how long the run has been going. */
     public static String progressLine(int landed, int planned, int unverified, long elapsedMs) {
         String of;
         if (planned == Plan.FRAMES_UNLIMITED) {
@@ -236,13 +236,16 @@ public final class Hud {
         } else {
             of = landed + " / " + planned + FRAMES_UNIT;
         }
+        // 已拍, not 已落盘: taken is what this app knows at this point. Whether each one reached the
+        // card is what the tail of this line is about, and a label that claims more than the app can
+        // see is the habit this whole project exists to avoid.
         String tail = "   \u5df2\u7528 " + clock(elapsedMs, false);          // 已用
         if (unverified > 0) {
-            // Taken, not confirmed. Saying it is the difference between "the app cannot see this card"
-            // and "the app is losing frames", and the two need different answers.
+            // Taken, not accounted for on the card. Saying it is the difference between "the app cannot
+            // see this card" and "the app is losing frames", and the two need different answers.
             tail += "   \u672a\u6838\u5b9e " + unverified + FRAMES_UNIT;    // 未核实 N 张
         }
-        return "\u5df2\u843d\u76d8 " + of + tail;
+        return "\u5df2\u62cd " + of + tail;
     }
 
     /** How long ago, in the shortest unit that says it: {@code 7s}, {@code 3min}, {@code 2h}. */

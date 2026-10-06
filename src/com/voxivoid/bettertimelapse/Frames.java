@@ -34,12 +34,6 @@ public final class Frames {
         return plan.driveMode() == Plan.DRIVE_BRACKET3 ? 3 : 1;
     }
 
-    /** Whether enough new files appeared for one frame of this plan. */
-    public static boolean frameArrived(int before, int after, Plan plan) {
-        if (before == UNKNOWN || after == UNKNOWN) return false;
-        return after - before >= filesPerFrame(plan);
-    }
-
     /** New files since the baseline, never negative (a card swapped between shots can go backwards). */
     public static int arrived(int baseline, int now) {
         if (baseline == UNKNOWN || now == UNKNOWN) return 0;
@@ -47,10 +41,45 @@ public final class Frames {
     }
 
     /**
-     * How long to wait for the file to appear before calling the frame lost. A long exposure plus a
-     * slow card is legitimately seconds; past this, the frame is not coming.
+     * How long to wait for the camera's own shutter callback before carrying on without it.
+     *
+     * <p>Not a verdict on the frame — the card is what decides that — but the release valve for the
+     * state machine, which cannot fire the next frame while it believes one is in flight. Half the
+     * interval, so a callback that never comes costs at most half a frame's spacing; never less than
+     * {@value #CALLBACK_FLOOR_MS} ms, because a body that takes most of a second to report a frame is
+     * still working, and never more than {@value #CALLBACK_CEIL_MS} ms, because past that the interval
+     * itself is the smaller number and waiting longer would move the next frame.
      */
-    public static final long LAND_TIMEOUT_MS = 4000;
+    public static long callbackTimeoutMs(Plan plan) {
+        return clamp(plan.intervalMs() / 2, CALLBACK_FLOOR_MS, CALLBACK_CEIL_MS);
+    }
+
+    /**
+     * When to look at the card for the frame that has just been taken.
+     *
+     * <p>Deliberately not immediately. The file is written <em>after</em> the shutter, so a walk taken
+     * the instant the camera reports the frame finds nothing and would call a perfectly good frame
+     * unwritten — which is exactly what it did, on every frame, before this was moved. Late in the
+     * interval the file has had time to appear, and the answer is worth something. Never sooner than
+     * the settle delay, which is this plan's own statement of how long the body needs after a frame.
+     */
+    public static long verdictDelayMs(Plan plan) {
+        return clamp(Math.max(plan.intervalMs() * 3 / 4, plan.settleMs()),
+                VERDICT_FLOOR_MS, VERDICT_CEIL_MS);
+    }
+
+    /** How many frames a gain of {@code files} new files accounts for. */
+    public static int framesAccounted(int files, Plan plan) {
+        if (files <= 0) return 0;
+        return files / filesPerFrame(plan);
+    }
+
+    private static long clamp(long value, long low, long high) {
+        return value < low ? low : (value > high ? high : value);
+    }
+
+    private static final long CALLBACK_FLOOR_MS = 800, CALLBACK_CEIL_MS = 2500;
+    private static final long VERDICT_FLOOR_MS = 500, VERDICT_CEIL_MS = 5000;
 
     /**
      * Frames the card can still take, from the free space and a measured frame size. A floor, and
