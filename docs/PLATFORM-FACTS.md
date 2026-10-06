@@ -81,6 +81,7 @@ Camera camera = (Camera) cx.getMethod("getNormalCamera").invoke(cameraEx);
 | 支持性探测：`ParametersModifier.isSupportedSilentShutterMode()`；否则 `setSilentShutterMode()` 会 `NoSuchMethodError` | 【上游源码；recipe-lab 记录 `setSilentShutterMode` 不是所有机身都有】 |
 | **拍摄是「按下 / 放开」一对，而且必须有活跃预览流**：`Camera.takePicture(null,null,null)`（按下）→ 约 **2500ms** → `CameraEx.cancelTakePicture()` + `Camera.startPreview()`（放开）。没有预览流时 `CameraEx.burstableTakePicture()` 会被拒，真机报 **`BurstableTakePicture failed`**（第一张之后必现） | 【实测·本机】+【recipe-lab 实测：`DevTools.SHUTTER_MS = 2500`，sample run 在 ILCE-6001 / 固件 v3.21 上拍成 77 张；`MainActivity.java:88` 的 `runNext = cancelCapture(); resumePreview();`，`:201` 的 `surfaceCreated = setPreviewDisplay + startPreview`】 |
 | 因此**这台机身的每张最小周期 ≈ 2.5s（按住窗口）+ 0.4s（放开到下一次按下的余量）= 2.9s**：「间隔 2s」在这台机身上物理做不到，不是排程写法问题 | 【实测·本机（2s 间隔下必被拒）】+【recipe-lab 的常量】 |
+| **已用本 app 自己证实**：间隔 **5s** 连拍成功、**卡上文件与张数完全一致**（`卡增`/`核实` 逐帧对上）；间隔 **2s** 则被拒（`BurstableTakePicture failed`）。即 A20 推出的 2.9s 下限在真机上成立 | 【实测·本机，better-timelapse v0.1.0-dev.g88fa8dc0】 |
 | `ParametersModifier` 被调用的方法名（`setFocusMode` / `setDriveMode` / `setBurstDriveSpeed` / `setBurstDriveButtonReleaseBehave` / `setSilentShutterMode` / `setAutoExposureLock` / `setBracketMode` / `setExposureBracketMode` / `setExposureBracketPeriod` / `setNumOfBracketPicture`，以及常量 `DRIVE_MODE_*` / `AE_LOCK_ON` / `BRACKET_MODE_EXPOSURE` / `EXPOSURE_BRACKET_MODE_SINGLE`） | 【未验证】—— 这些名字来自老 app 的编译期依赖（TimeLapse 的 `app/build.gradle` 里那个已死的 `-SNAPSHOT` stub），**需要真机反射验证** |
 
 ### 4.1 实时预览参数（Sony 的参数字符串）

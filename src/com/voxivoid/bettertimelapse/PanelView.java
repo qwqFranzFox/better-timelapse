@@ -480,7 +480,7 @@ public final class PanelView extends View {
             paint.setTextSize(smallSize);
             paint.setColor(colText);
             String second = Hud.progressLine(engine.landed(), engine.plan().frames(),
-                    engine.unverified(), now());
+                    engine.unverified(), engine.skipped(), now());
             if (engine.lastLoss().length() > 0) second = second + "   " + engine.lastLoss();
             canvas.drawText(clip(second, full), padding,
                     baselineIn(top + height * 0.40f, height * 0.46f, paint), paint);
@@ -498,7 +498,8 @@ public final class PanelView extends View {
 
         paint.setTextSize(smallSize);
         paint.setColor(colText);
-        canvas.drawText(Hud.progressLine(engine.landed(), planned, engine.unverified(), now()),
+        canvas.drawText(Hud.progressLine(engine.landed(), planned, engine.unverified(),
+                        engine.skipped(), now()),
                 padding, baselineIn(barTop + barHeight, height * 0.42f, paint), paint);
 
         if (engine.meanIntervalMs() > 0) {

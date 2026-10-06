@@ -99,6 +99,17 @@ public final class Engine {
      */
     private int unverified;
 
+    /**
+     * Moments the run went past without taking a frame.
+     *
+     * <p>A frame whose moment is a whole interval in the past cannot be taken without landing on top of
+     * the next one. Firing back to back to "catch up" is exactly what the old app did when the camera
+     * fell behind — a 2 s time-lapse that quietly became "as fast as the card allows", with nothing on
+     * screen to say so (docs/PAIN-POINTS.md U-18). The moment is dropped and counted instead, which
+     * keeps the film's own timeline true: a gap where the camera was not ready, not a shifted sequence.
+     */
+    private int skipped;
+
     public Engine(Plan plan) {
         this.plan = plan;
     }
@@ -248,6 +259,7 @@ public final class Engine {
         attemptsForCurrentFrame = 0;
         consecutiveFailures = 0;
         unverified = 0;
+        skipped = 0;
         lastFile = "";
         lastLoss = "";
         return ACT_NONE;
@@ -268,6 +280,14 @@ public final class Engine {
             return ACT_NONE;
         }
         if (remaining > 0) return ACT_ARM_TIMER;
+        if (remaining <= -plan.intervalMs()) {
+            // A whole interval late: this moment is gone. Skipping keeps the next frames on the grid
+            // they were announced on, rather than sliding the rest of the run behind a camera that
+            // could not keep up.
+            skipped++;
+            schedule.advance();
+            return ACT_ARM_TIMER;
+        }
         state = EXPOSING;
         fired++;
         attemptsForCurrentFrame++;
@@ -318,6 +338,11 @@ public final class Engine {
     /** Frames the camera reported that the card count could not corroborate. */
     public int unverified() {
         return unverified;
+    }
+
+    /** Moments the run went past without a frame, because the camera was not free in time. */
+    public int skipped() {
+        return skipped;
     }
 
     /**

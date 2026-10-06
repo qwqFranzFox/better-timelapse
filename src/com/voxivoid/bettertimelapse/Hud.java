@@ -229,7 +229,8 @@ public final class Hud {
     }
 
     /** The progress line: frames taken against the plan, and how long the run has been going. */
-    public static String progressLine(int landed, int planned, int unverified, long elapsedMs) {
+    public static String progressLine(int landed, int planned, int unverified, int skipped,
+            long elapsedMs) {
         String of;
         if (planned == Plan.FRAMES_UNLIMITED) {
             of = landed + FRAMES_UNIT;                                   // 张
@@ -244,6 +245,11 @@ public final class Hud {
             // Taken, not accounted for on the card. Saying it is the difference between "the app cannot
             // see this card" and "the app is losing frames", and the two need different answers.
             tail += "   \u672a\u6838\u5b9e " + unverified + FRAMES_UNIT;    // 未核实 N 张
+        }
+        if (skipped > 0) {
+            // A moment that went by with no frame in it: the camera was not free in time. Silence here
+            // is what let the old app call a run complete while its timeline had holes in it.
+            tail += "   \u8df3\u8fc7 " + skipped + FRAMES_UNIT;                // 跳过 N 张
         }
         return "\u5df2\u62cd " + of + tail;
     }
