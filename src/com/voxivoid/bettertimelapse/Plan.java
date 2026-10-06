@@ -173,6 +173,18 @@ public final class Plan {
      * Keep a value inside its legal range. Every write goes through here, so no caller can put a row
      * into a state the formatter cannot render.
      */
+    /**
+     * A drive mode as the camera spells it.
+     *
+     * <p>Lower case, because that is what this body reports back — {@code single}, not {@code SINGLE}.
+     * Here rather than at either call site because there are two of them now (applying the plan at a run's
+     * start, and putting the body back on the way out), and two spellings of one wire value is exactly how
+     * a setting stops taking effect in one of the two directions.
+     */
+    public static String driveWire(int mode) {
+        return mode == DRIVE_BURST ? "burst" : mode == DRIVE_BRACKET3 ? "bracket" : "single";
+    }
+
     public static int clamp(int row, int value) {
         switch (row) {
             case ROW_INTERVAL:

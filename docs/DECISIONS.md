@@ -17,6 +17,7 @@
 | A7 | 自绘 Canvas UI，不用 Android 控件 | 老 app 的控件焦点不可见、`dialChanged` 同时喂三条刻度条（[PAIN-POINTS U-12/D-11](PAIN-POINTS.md)） | `PanelView` / `MenuView` / `PromptView` 自己持有「选中行」状态 |
 | A8 | 计划存**值 + 单位 + schema 版本**，不存 UI 刻度位置 | 老 app 存 `rawInterval` 这类刻度下标，刻度表一改旧存档就指向别的值 | 与老 app 的存档不兼容（本来也不迁移） |
 | A9 | 张数由**存储卡上的文件**确认（目录内新增文件计数），而不是只数快门回调 | 老 app 的 `shotCount++` 无条件执行，卡满/写失败照旧计数 | 需要 `WRITE_EXTERNAL_STORAGE` 才能读 DCIM 目录；`Frames` 是纯类，目录观测在外壳 |
+| A10b | **退出规则已落地**（A10 的后半句终于有实现）：`onPause` 且 `isFinishing()` 时，把 `stored`（= 开相机时从机身读到的值，A25）推回机身，只写真正不同的行；AEL 只在本 app 锁过时解锁 | 此前 app 在机身上改过静音/驱动/AEL 就留在那里，退出后相机处在「上一次运行要的状态」——退出规则从第一版就写在文档里，却没有任何调用者 | `MainActivity.restoreCameraSettings()` + `Plan.driveWire()`（两处调用点共用一种拼写，避免「一个方向生效、另一个方向不生效」）；`aelLockedByUs` 跟踪而非猜测 |
 | A10 | 设置存储写入遵守五条安全规则（写前逐槽位查只读、单字节、失败写明槽位与字节数、退出时写「已存储值」、不碰固件） | skill 的 tripwire 与 recipe-lab 的实测 | 任何写路径都必须先过 `Store.lockedFrom()` |
 | A11 | 完成屏 = 结果摘要 + 三个下一步；推广只允许出现在 About | 老 app 的完成屏是捐款/邮箱/Instagram（[PAIN-POINTS U-04](PAIN-POINTS.md)） | 需要一个「结果摘要」纯类（`Hud`） |
 | A12 | 界面语言用 Java 文本表 + 打包裁剪 CJK 字体，不用 Android 资源 | API 10 上 locale/字体机制不可靠；recipe-lab 已验证（`Lang` + `assets/fonts` + `LangTest` 查 cmap 字形） | 新增语言 = 加一张表 + `subset-font.py` 重新裁字体 |

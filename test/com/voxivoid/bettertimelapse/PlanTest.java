@@ -121,6 +121,16 @@ class PlanTest {
     }
 
     @Test
+    void theDriveModeHasOneSpellingForTheCamera() {
+        // Two spellings of one wire value is how a setting stops taking effect in one direction: this
+        // mapping is used both when a run starts and when the body is put back on the way out.
+        assertEquals("single", Plan.driveWire(Plan.DRIVE_SINGLE));
+        assertEquals("burst", Plan.driveWire(Plan.DRIVE_BURST));
+        assertEquals("bracket", Plan.driveWire(Plan.DRIVE_BRACKET3));
+        assertEquals("single", Plan.driveWire(999), "an unknown mode falls back to the harmless one");
+    }
+
+    @Test
     void theExitRulePutsBackWhatTheCameraHolds() {
         Plan p = new Plan();
         p.set(Plan.ROW_INTERVAL, 2000);
@@ -137,5 +147,24 @@ class PlanTest {
         assertTrue(p.silentShutter());
         assertFalse(p.autoExposureLock());
         assertFalse(p.dirty());
+    }
+
+    @Test
+    void theExitRuleAfterSeedingRestoresTheBodyAndNotTheDefaults() {
+        Plan p = new Plan();
+        // What the body held when it was opened: silent shutter ON, bracketing. The app's own defaults
+        // are the opposite of both, which is exactly the mistake the exit rule must not make.
+        p.seed(Plan.ROW_SILENT, 1);
+        p.seed(Plan.ROW_DRIVE, Plan.DRIVE_BRACKET3);
+
+        p.set(Plan.ROW_SILENT, 0);
+        p.set(Plan.ROW_DRIVE, Plan.DRIVE_SINGLE);
+        assertTrue(p.dirty());
+
+        p.revert();
+
+        assertTrue(p.silentShutter(), "the exit rule puts back what the camera held, not what this app likes");
+        assertEquals(Plan.DRIVE_BRACKET3, p.driveMode());
+        assertFalse(p.dirty(), "and nothing is left pending");
     }
 }

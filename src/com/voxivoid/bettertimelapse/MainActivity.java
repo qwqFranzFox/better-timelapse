@@ -90,6 +90,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** Whether a run was in progress when the app was switched away from. */
     private boolean runInterrupted;
 
+    /** Whether this app is the one holding the exposure lock. AEL cannot be read back, so it is tracked. */
+    private boolean aelLockedByUs;
+
     /** When the current frame was handed to the camera, for the callback latency. */
     private long firedAtMs;
 
@@ -261,6 +264,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // Remembered for onReturn: the run cannot survive the camera being released, and a run that
         // silently stops being driven is worse than one that ends and says so.
         runInterrupted = engine.midRun();
+        // Leaving for good? Then the camera goes back the way it was found (docs/DECISIONS.md A10).
+        if (isFinishing()) restoreCameraSettings();
         camera.clearShutterListener();
         camera.release();
         camera.close();
@@ -317,6 +322,32 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     };
 
     /**
+     * Put the body back the way this app found it.
+     *
+     * <p>The exit rule, promised in docs/DECISIONS.md A10 and never implemented until now: the app sets
+     * live parameters while it runs — silent shutter, drive mode, exposure lock — and until this existed
+     * it left them there, so what the camera did after the app closed depended on what the last run of the
+     * app had asked for. The values pushed back are the ones read off the body when it was opened
+     * ({@link #seedPlanFromCamera}), not a snapshot of a previous launch and not this app's defaults.
+     *
+     * <p>Only rows that are actually different are written, and AEL only if this app is the one that
+     * locked it: a body that would not say what it held must not be "corrected" by a guess.
+     */
+    private void restoreCameraSettings() {
+        if (!camera.isOpen()) return;
+        Plan plan = engine.plan();
+        int silent = plan.stored(Plan.ROW_SILENT);
+        if (plan.get(Plan.ROW_SILENT) != silent) camera.setSilentShutter(silent != 0);
+        int drive = plan.stored(Plan.ROW_DRIVE);
+        if (plan.get(Plan.ROW_DRIVE) != drive) camera.setDriveMode(Plan.driveWire(drive));
+        if (aelLockedByUs) {
+            camera.setAutoExposureLock(false);
+            aelLockedByUs = false;
+        }
+        plan.revert();
+    }
+
+    /**
      * Open the camera, and say plainly what happened. A body that cannot be opened still gets a
      * working panel — in dry run — rather than a crash or a blank screen.
      */
@@ -365,9 +396,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // burst mode takes several frames per press, which is exactly the kind of surprise the old app
         // shipped and this one must not.
         // Lower case: the camera reports "single", so that is the string it takes.
-        String wanted = plan.driveMode() == Plan.DRIVE_BURST ? "burst"
-                : plan.driveMode() == Plan.DRIVE_BRACKET3 ? "bracket" : "single";
-        if (!camera.setDriveMode(wanted)) failed.append("\u9a71\u52a8 ");                    // 驱动
+        if (!camera.setDriveMode(Plan.driveWire(plan.driveMode()))) failed.append("\u9a71\u52a8 ");  // 驱动
 
         // Both directions, every time. Sending only the "on" value left the body holding whatever the
         // previous run had set while the row on screen said otherwise — the lie this project exists to
@@ -378,8 +407,16 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // AEL is applied in both directions too, but only the "on" direction is reported: the modifier
         // route cannot prove the off one, and a line that complains about a setting nobody asked for
         // teaches its user to stop reading it.
-        if (!camera.setAutoExposureLock(plan.autoExposureLock()) && plan.autoExposureLock()) {
+        boolean aelWanted = plan.autoExposureLock();
+        if (aelWanted && camera.setAutoExposureLock(true)) {
+            // Remembered so the exit rule can undo exactly this and nothing else: AEL has no read-back, so
+            // an app that unlocks on the way out "to be safe" would be clearing a lock the user set with
+            // the camera's own AEL button.
+            aelLockedByUs = true;
+        } else if (aelWanted) {
             failed.append("AEL ");
+        } else if (aelLockedByUs && camera.setAutoExposureLock(false)) {
+            aelLockedByUs = false;
         }
 
         // What the body actually holds, read back after the writes above: the difference between "the

@@ -155,6 +155,8 @@ public class Activity extends Context {
     protected void onResume() { }
     protected void onPause() { }
     public void setContentView(View v) { }
+    // API 1, and the exit rule hangs off it: settings are put back only when the app is really going away.
+    public boolean isFinishing() { return false; }
     public Resources getResources() { return null; }
     public AssetManager getAssets() { return null; }
     public void finish() { }
