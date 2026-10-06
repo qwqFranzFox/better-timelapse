@@ -822,9 +822,24 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             case Keys.K_MENU:
             case Keys.K_SK1:
                 handler.removeCallbacks(onMenuHold);
-                // MENU leaves the app; a hold is the app menu, still to come, and the fired hold
-                // swallows the release so leaving and opening cannot both happen.
-                if (menu.up() == Keys.Hold.SHORT) finish();
+                // MENU still leaves the app -- from a screen where there is nothing to lose. During a run
+                // it ends the run instead, cleanly, and the panel says how many frames it got: the old
+                // app ended the app *and* the run on one press of this key, with nothing asked and nothing
+                // reported (docs/PAIN-POINTS.md U-01). Losing a night's frames to a mis-keyed button is
+                // the one outcome this app must not have, and the way to not have it is to make the key
+                // unable to do it.
+                if (menu.up() == Keys.Hold.SHORT) {
+                    if (engine.midRun()) {
+                        engine.stop(Engine.FAULT_NONE, now());
+                        handler.removeCallbacks(onTick);
+                        handler.removeCallbacks(onRelease);
+                        handler.removeCallbacks(onRetryFire);
+                        handler.removeCallbacks(onVerdict);
+                        panel.invalidate();
+                    } else {
+                        finish();
+                    }
+                }
                 return true;
             default:
                 return true;

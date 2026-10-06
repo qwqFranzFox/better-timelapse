@@ -235,6 +235,36 @@ class EngineTest {
     }
 
     @Test
+    void aStopWithNoFaultIsAFinishedRunAndNotAFailure() {
+        Shell shell = new Shell(plan(5000, 100, 0), 0);
+        shell.start();
+        shell.shoot();
+        shell.shoot();
+
+        // What MENU does during a run now: end it cleanly. The frames are on the card, the panel says how
+        // many, and there is no fault to explain because nothing went wrong.
+        shell.engine.stop(Engine.FAULT_NONE, shell.now);
+
+        assertEquals(Engine.DONE, shell.engine.state());
+        assertEquals(Engine.FAULT_NONE, shell.engine.fault());
+        assertEquals("", shell.engine.faultText(), "a run the user ended is not a fault");
+        assertEquals(2, shell.engine.landed(), "and what it shot is still counted");
+        assertFalse(shell.engine.midRun(), "so the next MENU press may leave the app");
+    }
+
+    @Test
+    void aPausedRunIsStillARunThePanelMustNotEditUnder() {
+        Shell shell = new Shell(plan(5000, 10, 0), 0);
+        shell.start();
+        shell.shoot();
+        shell.engine.step(Engine.EV_TRASH, shell.now);
+
+        assertEquals(Engine.PAUSED, shell.engine.state());
+        assertFalse(shell.engine.running(), "TRASH has to be able to resume it");
+        assertTrue(shell.engine.midRun(), "but it still owns the camera and the plan");
+    }
+
+    @Test
     void holdingTrashStopsTheRunAndSaysTheUserDidIt() {
         Shell shell = new Shell(plan(1000, 100, 0), 0);
         shell.start();
