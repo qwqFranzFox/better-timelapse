@@ -150,6 +150,23 @@ class LogLinesTest {
     }
 
     @Test
+    void thePreflightLineSaysWhatTheUserDidAboutIt() {
+        // A run full of holes that was started by accident is a defect; the same run started deliberately is a
+        // decision, and only the file can tell them apart afterwards.
+        String ok = LogLines.preflight(5000, 3700, 50, true, "ok", "ok");
+        assertTrue(ok.contains("interval=5000ms"), ok);
+        assertTrue(ok.contains("shortest=3700ms"), ok);
+        assertTrue(ok.contains("exposure=50ms"), ok);
+        assertTrue(ok.contains("nr=on"), ok);
+        assertTrue(ok.contains("action=ok"), ok);
+
+        assertTrue(LogLines.preflight(3000, 3700, 50, true, "refused", "间隔 3s 短于…")
+                .contains("action=refused"));
+        assertTrue(LogLines.preflight(3000, 3700, 50, true, "override", "间隔 3s 短于…")
+                .contains("action=override"));
+    }
+
+    @Test
     void theFirstLineSaysWhatTheFileIs() {
         assertEquals("# better-timelapse session", LogLines.header());
         assertEquals("schema=" + LogLines.SCHEMA, LogLines.schema());

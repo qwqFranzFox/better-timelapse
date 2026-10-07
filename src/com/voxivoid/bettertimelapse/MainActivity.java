@@ -614,6 +614,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         }
         // Logged either way: turning the interval during a run moves the next frame's moment to now, and a log
         // that stays silent about it cannot explain a frame that fires long after the run started.
+        startOverride = false;
+        handler.removeCallbacks(onOverrideExpiry);
         log(LogLines.planEdit(row, Hud.rowValue(engine.plan(), row), rebased));
         if (rebased) pump();                            // re-arm for the new spacing
     }
@@ -681,15 +683,17 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * quietly to cover it: that is the old app's failure, a number on screen that is not the number
      * being shot.
      */
-    private void warnIfImpossible() {
+    /**
+     * What is wrong with this plan, or an empty string when nothing is.
+     *
+     * <p>Two constraints, and the longer one wins: what the shutter and the body need between frames, and what
+     * the exposure plus — with noise reduction on — its dark frame occupies the camera for.
+     */
+    private String preflightProblem() {
         Plan plan = engine.plan();
         long measured = body.shortestIntervalMs(plan);
         long planned = Frames.shortestIntervalMs(plan, exposureMs, longExposureNr);
         long shortest = Math.max(measured, planned);
-        if (plan.intervalMs() >= shortest) {
-            log(LogLines.preflight(plan.intervalMs(), shortest, exposureMs, longExposureNr, "ok"));
-            return;
-        }
         StringBuilder why = new StringBuilder();
         why.append("\u95f4\u9694 ").append(Steps.shortMs(plan.intervalMs()))                 // 间隔 <n>
                 .append(" \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 ")              // 短于本机身所需的
@@ -704,11 +708,59 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             why.append("\uff08\u5b9e\u6d4b\uff09");                                        // （实测）
         }
         why.append("\uff1a\u76f8\u673a\u4f1a\u6765\u4e0d\u53ca");                       // ：相机会来不及
-        // Both places, because they are read by different people: the screen by whoever is standing at the
-        // camera, the file by whoever reads the run afterwards and wonders why four frames of five are holes.
-        panel.setEvidence(why.toString());
-        log(LogLines.preflight(plan.intervalMs(), shortest, exposureMs, longExposureNr, why.toString()));
+        return why.toString();
     }
+
+    /**
+     * Hold the start back once, and say why.
+     *
+     * <p>The alternative was to forbid the value, and the session log is the argument against it: a run at a
+     * 3 s interval lost four frames of five, and its {@code late=} was 2147/1278/1820/909 ms -- the app was
+     * blocking its own timer with parameter reads, not being held up by the camera. With that fixed the
+     * lateness is 7 ms. And the shortest interval is not a fact of the body alone: part of it is the settle
+     * row, which the user chose. Refusing on a number like that would refuse runs that work.
+     *
+     * <p>So the first press explains and asks; the second goes ahead and the log records that it was decided
+     * rather than stumbled into. Any row edit, or ten seconds, takes the question away.
+     *
+     * @return true when the run may start.
+     */
+    private boolean startAllowed(String problem) {
+        if (problem.length() == 0) {
+            log(LogLines.preflight(engine.plan().intervalMs(), 0, exposureMs, longExposureNr, "ok", "ok"));
+            return true;
+        }
+        if (startOverride) {
+            startOverride = false;
+            log(LogLines.preflight(engine.plan().intervalMs(), 0, exposureMs, longExposureNr,
+                    "override", problem));
+            return true;
+        }
+        startOverride = true;
+        handler.removeCallbacks(onOverrideExpiry);
+        handler.postDelayed(onOverrideExpiry, OVERRIDE_MS);
+        panel.setEvidence(problem + "  \u518d\u6309\u4e2d\u5fc3\u4ecd\u7167\u62cd");       // 再按中心仍照拍
+        log(LogLines.preflight(engine.plan().intervalMs(), 0, exposureMs, longExposureNr,
+                "refused", problem));
+        panel.invalidate();
+        return false;
+    }
+
+    /** Whether a start the preflight refused is waiting for a second press. */
+    private boolean startOverride;
+
+    /** How long the question stands before it goes away on its own. */
+    private static final long OVERRIDE_MS = 10_000;
+
+    private final Runnable onOverrideExpiry = new Runnable() {
+        @Override
+        public void run() {
+            if (!startOverride) return;
+            startOverride = false;
+            panel.clearEvidence();
+            panel.invalidate();
+        }
+    };
 
     /**
      * The only place the engine is stepped, and the only place timers are posted.
@@ -1332,16 +1384,20 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         // warning that had been fixed stayed on screen through every later run. Photographed
                         // on the camera: 间隔 3s 短于本机身所需的 2.9s, with the interval row reading 3 s.
                         panel.clearEvidence();
+                        startOverride = false;
+                        handler.removeCallbacks(onOverrideExpiry);
                         shortfallSaid = false;
                         retryDeviceDump();
                         refreshExposure();
                         applyPlanToCamera();
+                        // Held back once when the plan asks for more than this body has: the reason goes on the
+                        // screen, the second press goes ahead, and the file records which of the two it was.
+                        if (!startAllowed(preflightProblem())) return true;
                         runStartMs = now();
                         loggedSkipped = 0;
                         loggedState = Engine.IDLE;
                         summaryLogged = false;
                         logRunStart();
-                        warnIfImpossible();
                     }
                     engine.step(Engine.EV_ENTER, now());
                     log(LogLines.runStart(runStartMs()));

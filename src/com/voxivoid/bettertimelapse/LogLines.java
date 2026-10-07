@@ -135,11 +135,19 @@ public final class LogLines {
         return "run start at=" + rel(atMs);
     }
 
-    /** What the app said before the first frame, so a reader of the file sees what the screen said. */
-    public static String preflight(long intervalMs, long shortestMs, long exposureMs, boolean nr, String said) {
+    /**
+     * What the app said before the first frame, and what the user did about it.
+     *
+     * <p>{@code action} is one of {@code ok} (the plan fits), {@code refused} (the start was held back so the
+     * user could see what would happen) or {@code override} (they pressed again and went ahead anyway). The
+     * three are kept apart because the difference matters afterwards: a run full of holes that was started by
+     * accident is a defect, and the same run started deliberately is a decision.
+     */
+    public static String preflight(long intervalMs, long shortestMs, long exposureMs, boolean nr,
+            String action, String said) {
         return "preflight interval=" + ms(intervalMs) + " shortest=" + ms(shortestMs)
                 + " exposure=" + ms(exposureMs) + " nr=" + (nr ? "on" : "off")
-                + " said=" + text(said, "ok");
+                + " action=" + text(action, "?") + " said=" + text(said, "ok");
     }
 
     /** A row the user turned, and whether that moved the timetable (docs/DECISIONS.md A22). */
