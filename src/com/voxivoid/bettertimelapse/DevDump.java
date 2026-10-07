@@ -107,6 +107,10 @@ public final class DevDump {
         b.append("\u6743\u9650 ").append(hasWritePermission(context) ? "\u6709" : "\u65e0");   // 权限 有/无
         b.append("  \u72b6\u6001 ").append(storageState());                                 // 状态 <...>
         b.append("  /mnt/sdcard\u53ef\u5199 ").append(writable("/mnt/sdcard"));               // 可写
+        // The directory the old TimeLapse app created here and logged into. If this app may not write inside
+        // it either, the difference is not the path and not the directory's owner; if it may, then where a
+        // write goes is part of the answer and the dump should use a directory that already exists.
+        b.append("  TIMELPS\u53ef\u5199 ").append(writable(environmentPath("TIMELPS")));      // 可写
         try {
             File ext = Environment.getExternalStorageDirectory();
             if (ext != null) b.append("  ext\u53ef\u5199 ").append(writable(ext.getPath()));
@@ -131,6 +135,17 @@ public final class DevDump {
             return state == null ? "?" : state;
         } catch (Throwable t) {
             return "?";
+        }
+    }
+
+    /** A child of the card root, or an empty string when there is no card root to speak of. */
+    private static String environmentPath(String child) {
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext == null) return "";
+            return new File(ext, child).getPath();
+        } catch (Throwable t) {
+            return "";
         }
     }
 
