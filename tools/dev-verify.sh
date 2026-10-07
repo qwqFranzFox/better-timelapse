@@ -171,8 +171,25 @@ public class Activity extends Context {
     public AssetManager getAssets() { return null; }
     public void finish() { }
     public String getPackageName() { return null; }
+    // The log says which build wrote it, which needs the package's own version: three rounds of one
+    // feature were diagnosed from logs whose build could only be guessed at, and one guess was wrong.
+    public android.content.pm.PackageManager getPackageManager() { return null; }
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) { return false; }
     public boolean onKeyUp(int keyCode, android.view.KeyEvent event) { return false; }
+}
+EOF
+    mkdir -p "$STUBS/android/content/pm"
+    cat > "$STUBS/android/content/pm/PackageManager.java" <<'EOF'
+package android.content.pm;
+public class PackageManager {
+    public PackageInfo getPackageInfo(String name, int flags) { return null; }
+}
+EOF
+    cat > "$STUBS/android/content/pm/PackageInfo.java" <<'EOF'
+package android.content.pm;
+public class PackageInfo {
+    public String versionName;
+    public int versionCode;
 }
 EOF
     cat > "$STUBS/android/graphics/Color.java" <<'EOF'

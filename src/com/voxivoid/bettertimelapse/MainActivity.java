@@ -694,7 +694,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // The run's own tally, from before its first frame. Kept apart from the walk-to-walk count the verdicts
         // use: the baseline of THIS run, not wherever the last one left the counter.
         cardBaseline = cardCount;
-        Session.line(this, "boot firstframe=" + LogLines.ms(startupMs)
+        Session.line(this, "app " + appIdentity()
+                + "\n" + "boot firstframe=" + LogLines.ms(startupMs)
                         + " font=" + LogLines.text(UiFont.route(), "?")
                 + "\n" + "paths log=" + LogLines.text(Session.path(), "-")
                         + " dump=" + LogLines.text(DevDump.written(), "-")
@@ -703,6 +704,25 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // The one thing about the log the user has to know while standing at the camera.
             panel.setLogNote("\u65e5\u5fd7\u5199\u4e0d\u8fdb\uff1a"                     // 日志写不进：
                     + LogLines.text(Session.problem(), "?"));
+        }
+    }
+
+    /**
+     * Which build wrote this log line, straight from the installed package.
+     *
+     * <p>Not vanity: three rounds of this feature were diagnosed from logs whose build could only be inferred
+     * from which fields happened to be present, and one of those inferences was wrong. A file that is the only
+     * instrument for a four-hour run has to say what wrote it. The version name carries the commit hash and
+     * whether the tree was dirty, so one line identifies the exact source.
+     */
+    private String appIdentity() {
+        try {
+            android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return "version=" + LogLines.text(info.versionName, "?")
+                    + " code=" + info.versionCode;
+        } catch (Throwable t) {
+            // A package the platform will not describe is not worth failing a run over.
+            return "version=?";
         }
     }
 
@@ -1107,12 +1127,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         @Override
         public void run() {
             if (!panelShouldDarken()) return;
-            // The preview stream stops first, and this is the one thing the old app did that this app did not.
-            // It switched this body's output successfully for years; this app switched it, was told the call had
-            // been accepted, and left the glass lit on the frame that had just been taken. A running preview is
-            // a stream the body is still driving, and the switching app is the one that stopped it. The stream
-            // comes back in wakePanel(), a whole interval before the next frame needs it.
-            camera.stopPreview();
             if (!screen.off()) {
                 // A screen that will not switch off is worth saying once, on the evidence line, with the reason
                 // — and never worth retrying per frame.
@@ -1120,6 +1134,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 panel.invalidate();
                 return;
             }
+            // The preview stream stops *after* the screen is off, never before, so that stopping it and
+            // restarting it are a pair: the old app stops the stream and then switches the output
+            // (ShootActivity:67-68), and this app had never stopped a preview outside onPause. Doing it in the
+            // other order is what broke a run -- a preview stopped for a panel that never went dark is a camera
+            // that will not take another frame, and the log of that run has two shots in it and then a pause.
+            camera.stopPreview();
             log(LogLines.panel("off", screen.working(), screen.activeDevice(), screen.problem()));
         }
     };
@@ -1141,13 +1161,14 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void wakePanel() {
         handler.removeCallbacks(onPanelOff);
-        if (!screen.isOff()) return;
-        if (screen.on()) log(LogLines.panel("on", screen.working(), screen.activeDevice(), screen.problem()));
-        // The preview is put back deliberately and not left to luck. Switching the display output is a platform
-        // call about the whole screen, and this body will not take a photograph without a live preview stream —
-        // the failure is `BurstableTakePicture failed`, and it would arrive as a frame that could not be taken
-        // rather than as anything mentioning the panel (docs/DECISIONS.md A20). Restarting a preview that never
-        // stopped costs nothing worth measuring.
+        if (screen.isOff()) {
+            if (screen.on()) log(LogLines.panel("on", screen.working(), screen.activeDevice(), screen.problem()));
+        }
+        // The preview comes back whenever a panel is about to be looked at, and never only when this class
+        // believes the screen was dark. Switching a display output can leave the stream stopped, and this body
+        // will not take a photograph without a live one -- a failure that arrives as `BurstableTakePicture
+        // failed`, with nothing in it mentioning the panel (docs/DECISIONS.md A20). Restarting a preview that
+        // never stopped costs nothing worth measuring; not restarting one that did costs the rest of the run.
         camera.resumePreview();
     }
 
