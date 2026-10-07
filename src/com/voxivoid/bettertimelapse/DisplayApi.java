@@ -152,6 +152,65 @@ public final class DisplayApi {
     }
 
     /**
+     * Take this application's own graphics off the panel, without switching the output.
+     *
+     * <p>The blunt instrument, and the second thing an output switch turns out not to be enough for: on the
+     * camera this was measured on, {@code switchDisplayOutputTo(DEVICE_ID_NONE)} was accepted, reported success,
+     * and left the screen showing the frame that had just been taken — the app's own drawing was gone, so the
+     * switch had done something, but the panel was still lit and still displaying. So both are used: the output
+     * switch says which device the body should drive, and this says whether this app's layer is drawn on it.
+     *
+     * @param visible {@code false} to stop drawing the application's graphics output, {@code true} to resume.
+     */
+    public boolean graphicsOutput(boolean visible) {
+        if (!supported() || !open()) return false;
+        try {
+            Object result = kind.getMethod("controlGraphicsOutputAll", boolean.class)
+                    .invoke(instance, visible);
+            if (result instanceof Boolean && !((Boolean) result)) return false;
+            return true;
+        } catch (Throwable t) {
+            problem = shortName(t);
+            return false;
+        }
+    }
+
+    /**
+     * What the body says its active display output is, or an empty string when it will not say.
+     *
+     * <p>Read straight after a switch, because "the call returned and did not throw" is not the same claim as
+     * "the output changed": the first version of this feature logged a successful off and left the user looking
+     * at a lit screen, which is the difference between an API that answered and a panel that obeyed. The body
+     * has an answer to that and this asks for it.
+     */
+    public String activeDevice() {
+        if (!supported() || !open()) return "";
+        try {
+            Object device = kind.getMethod("getActiveDevice").invoke(instance);
+            return device instanceof String ? (String) device : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * Whether the panel is on the list of devices this body reports as attached.
+     *
+     * <p>The blunt question behind a switch that does not appear to do anything: if the panel is not in
+     * {@code getActiveDevices()}, the app is switching an output the body is not driving, and no amount of
+     * repeating the call will darken the glass.
+     */
+    public String activeDevices() {
+        if (!supported() || !open()) return "";
+        try {
+            Object devices = kind.getMethod("getActiveDevices").invoke(instance);
+            return devices instanceof String[] ? join((String[]) devices, ",") : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
      * Let the display object go.
      *
      * <p>Upstream does this on the way out of the app ({@code releaseDisplayStatusListener()} and
@@ -260,9 +319,13 @@ public final class DisplayApi {
     }
 
     private static String join(String[] names) {
+        return join(names, "/");
+    }
+
+    private static String join(String[] names, String between) {
         StringBuilder b = new StringBuilder();
         for (int i = 0; i < names.length; i++) {
-            if (i > 0) b.append('/');
+            if (i > 0) b.append(between);
             b.append(names[i]);
         }
         return b.toString();

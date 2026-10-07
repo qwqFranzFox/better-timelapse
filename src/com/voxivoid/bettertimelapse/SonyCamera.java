@@ -197,6 +197,32 @@ public final class SonyCamera {
         resumePreview();
     }
 
+    /**
+     * Stop the preview stream, for the stretch in which the panel is dark.
+     *
+     * <p>Measured on the camera, through this app: switching the display output to {@code DEVICE_ID_NONE} was
+     * accepted and the panel stayed lit, showing the frame that had just been taken. The old app, which is the
+     * only app known to have switched this body's output successfully, stops the preview immediately before it
+     * switches (upstream {@code ShootActivity.java:67-68}: {@code camera.stopPreview()} then {@code
+     * display.off()}), and this app had never once stopped a preview outside {@code onPause}. A live preview
+     * stream is a device this body is driving continuously, and the difference between the two cases is a
+     * stream that has been told to stop.
+     *
+     * <p>Safe to interleave with a capture, because it happens in the quiet stretch after a frame has been
+     * released and its card file written: the next frame is due a whole interval later and
+     * {@link #resumePreview()} runs before it (docs/DECISIONS.md A20 — the body needs a live stream to take a
+     * shutter, so this call and that one are a pair).
+     */
+    public void stopPreview() {
+        if (camera == null) return;
+        try {
+            camera.stopPreview();
+            previewing = false;
+        } catch (Throwable t) {
+            previewProblem = shortName(t);
+        }
+    }
+
     /** Start the preview again. Silent: a body that restarts it by itself simply does not need this. */
     public void resumePreview() {
         if (camera == null || holder == null) return;

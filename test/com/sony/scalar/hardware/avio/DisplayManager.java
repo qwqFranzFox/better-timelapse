@@ -27,11 +27,20 @@ public class DisplayManager {
     /** Every value this stand-in has been switched to, in order. */
     public static final java.util.List<String> CALLS = new java.util.ArrayList<String>();
 
+    /** Every value this stand-in's graphics output has been set to, in order. */
+    public static final java.util.List<Boolean> GRAPHICS = new java.util.ArrayList<Boolean>();
+
+    /** What {@code getActiveDevice()} answers: the body agreeing, or not, that the output changed. */
+    public static String active = DEVICE_ID_PANEL;
+
     /** When set, the call throws it instead of switching: the body refusing, which must be reported. */
     public static RuntimeException failWith;
 
     /** When set, the call returns false instead of switching: a boolean API refusing the value. */
     public static Boolean refuse;
+
+    /** When set, the display-status release throws: proves the way out is resilient. */
+    public static RuntimeException failRelease;
 
     /** How many of these objects were constructed: a run must not build one per frame. */
     public static int constructions;
@@ -40,20 +49,29 @@ public class DisplayManager {
         constructions++;
     }
 
-    /**
-     * Switch the output. {@code boolean} rather than the real class's {@code void}, deliberately.
-     *
-     * <p>The body's signature is {@code public void switchDisplayOutputTo(java.lang.String)}, and this app
-     * reads the return value when there is one precisely so that a body which says "no" is not recorded as
-     * having switched. A {@code void} stand-in cannot express that refusal, so the shape here is the
-     * boolean-returning variant — and {@code off()}/{@code on()} still work against it, which is the
-     * compatibility this exists to check.
-     */
     public boolean switchDisplayOutputTo(String device) {
         if (failWith != null) throw failWith;
         if (Boolean.TRUE.equals(refuse)) return false;
         CALLS.add(device);
+        active = device;
         return true;
+    }
+
+    public boolean controlGraphicsOutputAll(boolean visible) {
+        GRAPHICS.add(visible);
+        return true;
+    }
+
+    public String getActiveDevice() {
+        return active;
+    }
+
+    public String[] getActiveDevices() {
+        return new String[] { active };
+    }
+
+    public void releaseDisplayStatusListener() {
+        if (failRelease != null) throw failRelease;
     }
 
     /** Present on the real class, and useless to a reflective caller: it proves a miss is harmless. */
@@ -63,8 +81,11 @@ public class DisplayManager {
     /** Reset between tests, so one test's calls are not another's. */
     public static void reset() {
         CALLS.clear();
+        GRAPHICS.clear();
+        active = DEVICE_ID_PANEL;
         failWith = null;
         refuse = null;
+        failRelease = null;
         constructions = 0;
     }
 }

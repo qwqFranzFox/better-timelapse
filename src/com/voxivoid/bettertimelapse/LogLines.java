@@ -299,8 +299,22 @@ public final class LogLines {
      * no {@code panel} line at all is a run where the feature was off, or the plan had no room for it.
      */
     public static String panel(String action, String working, String problem) {
+        return panel(action, working, "", problem);
+    }
+
+    /**
+     * The same, with what the body says its active output is afterwards.
+     *
+     * <p>{@code active=} is the difference between two failures that look identical on the screen. A call that
+     * throws or is refused is one thing; a call that returns cleanly, logs success, and leaves the panel lit is
+     * another, and only the body can tell them apart. {@code active=DEVICE_ID_NONE} after an off means the body
+     * agrees the output changed and the glass still being lit is something else entirely — which is exactly the
+     * state this feature was in when the screen was measured showing the frame that had just been taken.
+     */
+    public static String panel(String action, String working, String active, String problem) {
         return "panel " + text(action, "?")
                 + " via=" + text(working, "?")
+                + (active == null || active.length() == 0 ? "" : " active=" + text(active, "?"))
                 + (problem == null || problem.length() == 0 ? "" : " problem=" + text(problem, "?"));
     }
 

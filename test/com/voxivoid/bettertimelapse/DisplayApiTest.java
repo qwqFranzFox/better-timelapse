@@ -48,6 +48,31 @@ class DisplayApiTest {
     }
 
     @Test
+    void theGraphicsLayerIsTakenOffThePanelTooAndPutBackFirst() {
+        // Measured on the camera: the output switch alone was accepted, reported success, and left the glass
+        // lit showing the frame that had just been taken. So the app's own graphics output is controlled as
+        // well -- off with the switch, and back on before the panel is handed to DEVICE_ID_PANEL again, so the
+        // first thing the user sees is this app's screen rather than whatever the body had left there.
+        Screen screen = new Screen();
+        assertTrue(screen.off(), screen.problem());
+        assertTrue(screen.on(), screen.problem());
+        assertEquals(java.util.Arrays.asList(Boolean.FALSE, Boolean.TRUE), DisplayManager.GRAPHICS,
+                "graphics off on the way out, on before the panel comes back");
+    }
+
+    @Test
+    void aSwitchThatWorkedIsReportedWithWhatTheBodySaysIsActive() {
+        // `active=` is what separates "the call was refused" from "the call was accepted and the panel is
+        // still lit", which look identical on the screen and need different fixes.
+        DisplayApi api = new DisplayApi();
+        assertTrue(api.off(), api.problem());
+        assertEquals("DEVICE_ID_NONE", api.activeDevice());
+        assertTrue(api.on(), api.problem());
+        assertEquals("DEVICE_ID_PANEL", api.activeDevice());
+        assertEquals("DEVICE_ID_PANEL", api.activeDevices());
+    }
+
+    @Test
     void theDisplayObjectIsMadeOnceAndNotPerFrame() {
         // A run switches the output twice per frame, and upstream builds one DisplayManager for the life of the
         // app. Making a new one every two seconds for four hours is a camera resource held and dropped

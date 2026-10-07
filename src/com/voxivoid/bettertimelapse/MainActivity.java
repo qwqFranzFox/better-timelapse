@@ -1107,6 +1107,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         @Override
         public void run() {
             if (!panelShouldDarken()) return;
+            // The preview stream stops first, and this is the one thing the old app did that this app did not.
+            // It switched this body's output successfully for years; this app switched it, was told the call had
+            // been accepted, and left the glass lit on the frame that had just been taken. A running preview is
+            // a stream the body is still driving, and the switching app is the one that stopped it. The stream
+            // comes back in wakePanel(), a whole interval before the next frame needs it.
+            camera.stopPreview();
             if (!screen.off()) {
                 // A screen that will not switch off is worth saying once, on the evidence line, with the reason
                 // — and never worth retrying per frame.
@@ -1114,7 +1120,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 panel.invalidate();
                 return;
             }
-            log(LogLines.panel("off", screen.working(), screen.problem()));
+            log(LogLines.panel("off", screen.working(), screen.activeDevice(), screen.problem()));
         }
     };
 
@@ -1136,7 +1142,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private void wakePanel() {
         handler.removeCallbacks(onPanelOff);
         if (!screen.isOff()) return;
-        if (screen.on()) log(LogLines.panel("on", screen.working(), screen.problem()));
+        if (screen.on()) log(LogLines.panel("on", screen.working(), screen.activeDevice(), screen.problem()));
         // The preview is put back deliberately and not left to luck. Switching the display output is a platform
         // call about the whole screen, and this body will not take a photograph without a live preview stream —
         // the failure is `BurstableTakePicture failed`, and it would arrive as a frame that could not be taken

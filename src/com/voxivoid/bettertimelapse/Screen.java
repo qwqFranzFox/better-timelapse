@@ -42,6 +42,21 @@ public final class Screen {
         return api.working();
     }
 
+    /** Whether this app's own graphics are being drawn on the panel. */
+    public boolean graphicsOutput(boolean visible) {
+        return api.graphicsOutput(visible);
+    }
+
+    /** What the body says its active output is: the answer to "did the switch take". */
+    public String activeDevice() {
+        return api.activeDevice();
+    }
+
+    /** Every device the body reports as attached, for the case where the panel is not among them. */
+    public String activeDevices() {
+        return api.activeDevices();
+    }
+
     /** Whether this body can switch its display output at all. Asked without switching anything. */
     public boolean supported() {
         return api.supported();
@@ -57,7 +72,13 @@ public final class Screen {
      */
     public boolean off() {
         if (off) return true;
-        if (!api.off()) return false;
+        // Both, in this order, because either alone was measured not to be enough on this body: the output
+        // switch says which device the body should drive, and the graphics call says whether this app's own
+        // layer is drawn there. The graphics call is allowed to fail — a body without it still gets the switch
+        // — but a switch that fails is a failure, because then nothing has happened at all.
+        boolean switched = api.off();
+        boolean graphics = api.graphicsOutput(false);
+        if (!switched && !graphics) return false;
         off = true;
         return true;
     }
@@ -70,6 +91,9 @@ public final class Screen {
      * key that explains it. Failing to come back is the one failure here the user cannot work around.
      */
     public boolean on() {
+        // The graphics come back first: the app's layer keeps rendering either way, and showing a frame of the
+        // panel is a better first thing to see than whatever the body had on the glass.
+        api.graphicsOutput(true);
         if (!api.on()) return false;
         off = false;
         return true;
