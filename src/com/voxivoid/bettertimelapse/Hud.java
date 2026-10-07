@@ -296,6 +296,23 @@ public final class Hud {
     }
 
     /**
+     * The one line the dimmed label mode shows while a run is on.
+     *
+     * <p>Not the plan summary: with the screen reduced to a single line the question is never "what did I
+     * ask for" but "is it working", and the answer is the count, the holes where the camera was not ready,
+     * and the frames the card has not answered for yet.
+     */
+    public static String labelLine(int landed, int planned, int skipped, int unverified) {
+        String of = planned == Plan.FRAMES_UNLIMITED
+                ? landed + FRAMES_UNIT
+                : landed + " / " + planned + FRAMES_UNIT;
+        String line = "\u5df2\u62cd " + of;                                          // 已拍
+        if (skipped > 0) line += "   \u8df3\u8fc7 " + skipped + FRAMES_UNIT;         // 跳过 N 张
+        if (unverified > 0) line += "   \u672a\u6838\u5b9e " + unverified + FRAMES_UNIT;  // 未核实 N 张
+        return line;
+    }
+
+    /**
      * The measured line: the mean interval actually achieved and the drift per frame, against the
      * interval asked for. The old app showed a theoretical number that was wrong by a factor of
      * three and never compared it against what happened (U-10, U-18). A drift that is shown can be
@@ -316,15 +333,18 @@ public final class Hud {
         return b.toString();
     }
 
-    /** The row that says what the keys do. Hold actions are left out on purpose. */
+    /**
+     * The row that says what the keys do. Hold actions are left out on purpose — "它是给需要的人准备的，
+     * 不是邀请" (docs/PLAN.md §4.1) — and they were added back once, which is how the legend grew long
+     * enough to be drawn through the font note beside it. Held keys are announced where they take effect
+     * instead: the rehearsal note when it is switched on, the panel mode as the screen changes.
+     */
     public static String legend() {
         return "\u2190\u2192 \u5927\u8c03   "                      // ←→ 大调
                 + "\u6eda\u8f6e \u5fae\u8c03   "                  // 滚轮 微调
                 + "\u2191\u2193 \u6362\u884c   "                  // ↑↓ 换行
                 + "\u4e2d\u5fc3 \u5f00\u59cb   "                  // 中心 开始
-                + "TRASH \u6682\u505c   "                        // TRASH 暂停
-                + "\u957f\u6309\u2191 \u5c4f\u663e   "                // 长按↑ 屏显
-                + "\u957f\u6309\u2193 \u6f14\u7ec3";                  // 长按↓ 演练
+                + "TRASH \u6682\u505c";                          // TRASH 暂停
     }
 
     /** Shown once under the legend while the demo key is what drives the screen. */

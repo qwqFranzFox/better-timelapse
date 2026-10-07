@@ -32,7 +32,21 @@ import android.view.View;
  */
 public final class PanelView extends View {
 
-    /** How much of the screen the panel occupies. TRASH cycles it; a hidden panel is one line. */
+    /**
+     * How much of the screen the panel occupies: three steps of the same thing, which is light in front
+     * of a long exposure.
+     *
+     * <ul>
+     *   <li>{@link #PANEL_FULL} — the state, every row, the progress block, the legend and the
+     *       diagnostics. The screen for editing and for reading what happened.</li>
+     *   <li>{@link #PANEL_LABEL} — one line, centred and small: the state, the countdown, how many frames
+     *       are taken. For a shoot where the screen ends up in the frame but you still want to glance at
+     *       it.</li>
+     *   <li>{@link #PANEL_HIDDEN} — the state word alone, top left, dim. For a night frame where the
+     *       screen must not be a light source. The state is never one of the things dropped: a screen that
+     *       will not say whether the run is still going is the failure this app exists to avoid.</li>
+     * </ul>
+     */
     public static final int PANEL_FULL = 0, PANEL_LABEL = 1, PANEL_HIDDEN = 2;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -354,20 +368,19 @@ public final class PanelView extends View {
 
         float y = padding;
 
-        drawStatus(canvas, w, y, statusHeight);
-        y += statusHeight;
-
-        if (panelMode == PANEL_HIDDEN) {
-            drawLegend(canvas, w, h);
-            return;
-        }
         if (panelMode == PANEL_LABEL) {
-            // One line and nothing else: the state, the countdown and the plan, on black. For a long
-            // exposure the panel is a light source in the frame, and this is the compromise between
-            // a screen the user cannot read and no screen at all.
+            // One line and nothing else. This mode used to draw the top status bar *and* the centred line,
+            // which put the same sentence on the screen twice — photographed from the camera, twice.
             drawStatusOnly(canvas, w, h);
             return;
         }
+        if (panelMode == PANEL_HIDDEN) {
+            drawStateWordOnly(canvas, w, y, statusHeight);
+            return;
+        }
+
+        drawStatus(canvas, w, y, statusHeight);
+        y += statusHeight;
 
         y = drawRows(canvas, w, y, rowHeight * rowsVisible);
 
@@ -376,6 +389,20 @@ public final class PanelView extends View {
     }
 
     /** The label-only state: the state line and the plan, centred, on black. */
+    /**
+     * The state word alone, dim, top left: the whole of the hidden mode.
+     *
+     * <p>No countdown, no legend, no diagnostics, no font note — the point of this mode is that the screen
+     * is not a light source in the frame. What is kept is the one thing a camera app may never hide: which
+     * state the run is in.
+     */
+    private void drawStateWordOnly(Canvas canvas, float w, float top, float height) {
+        paint.setTextSize(bigSize);
+        paint.setColor(engine.state() == Engine.FAULT ? colWarn : colDim);
+        canvas.drawText(Hud.stateName(engine.state()), padding,
+                baselineIn(top, height, paint), paint);
+    }
+
     private void drawStatusOnly(Canvas canvas, float w, float h) {
         paint.setTextSize(bigSize);
         paint.setFakeBoldText(true);
@@ -396,7 +423,15 @@ public final class PanelView extends View {
             canvas.drawText(count, x, y, paint);
             x += paint.measureText(count) + padding * 2f;
         }
-        String rest = Hud.statusLine(engine.plan(), batteryPercent, charging, cardFreeBytes, bytesPerFrame);
+        // What follows depends on whether there is a run to report on: the plan while idle, the count
+        // while it is going. The plan summary is the answer to "what did I ask for", which is not the
+        // question anyone has while a shoot is running.
+        boolean over = engine.state() == Engine.IDLE || engine.state() == Engine.DONE
+                || engine.state() == Engine.FAULT;
+        String rest = over
+                ? Hud.statusLine(engine.plan(), batteryPercent, charging, cardFreeBytes, bytesPerFrame)
+                : Hud.labelLine(engine.landed(), engine.plan().frames(), engine.skipped(),
+                        engine.unverified());
         if (x + paint.measureText(rest) <= w - padding) {
             canvas.drawText(rest, x, y, paint);
         }
@@ -550,18 +585,37 @@ public final class PanelView extends View {
         float y = h - padding - paint.descent();
         canvas.drawText(clip(legend, w - padding * 2f), padding, y, paint);
 
+        // Where the legend ends, so that the note on the right of this row can be kept off it. The check
+        // used to be against the left edge of the screen alone, and once the legend grew the font note was
+        // drawn straight through it — photographed, twice, from the camera.
+        float legendEnd = padding + Math.min(paint.measureText(legend), w - padding * 2f);
+        String note = fontNote;
+        if (startupMs > 0) note = note + "  " + startupMs + "ms";
+        float noteWidth = note.length() == 0 ? 0f : paint.measureText(note);
+        // The dirty marker shares this row too, so it is measured before the decision.
+        float markWidth = engine.plan().dirty() ? paint.measureText("\u672a\u5b58") + padding * 2f : 0f;  // 未存
+        boolean noteInline = note.length() > 0
+                && w - padding - markWidth - noteWidth > legendEnd + padding * 2f;
+
         // The font failure gets its own line above the legend: it is the answer to "why is every
         // label a box", and a message that can be clipped or overwritten is a message that wastes a
         // round trip to the camera.
         float lineHeight = paint.descent() - paint.ascent();
+        float lines = 1f;
+        if (note.length() > 0 && !noteInline) {
+            // No room beside the legend: it goes on the stack instead of on top of something.
+            lines += 1f;
+            paint.setColor(colDim);
+            canvas.drawText(clip(note, w - padding * 2f), padding, y - lineHeight, paint);
+        }
         if (fontError.length() > 0) {
             paint.setColor(colWarn);
-            canvas.drawText(clip(fontError, w - padding * 2f), padding, y - lineHeight, paint);
+            canvas.drawText(clip(fontError, w - padding * 2f), padding, y - lineHeight * lines, paint);
+            lines += 1f;
             paint.setColor(colDim);
         }
         // Wrapped, not clipped. A single clipped line threw away most of the method list the one time
         // the list was the whole point — diagnostics that do not fit are diagnostics that do not exist.
-        float lines = fontError.length() > 0 ? 2f : 1f;
         float wrapWidth = w - padding * 2f;
         if (evidence.length() > 0) {
             paint.setColor(colWarn);
@@ -594,14 +648,9 @@ public final class PanelView extends View {
 
         // Which route the bundled font was loaded by, and how long the first frame took. Small, dim,
         // and the only way to tell either from a photograph of the screen.
-        String note = fontNote;
-        if (startupMs > 0) note = note + "  " + startupMs + "ms";
-        if (note.length() > 0) {
-            float width = paint.measureText(note);
-            if (cursor - width > padding) {
-                paint.setColor(colDim);
-                canvas.drawText(note, cursor - width, y, paint);
-            }
+        if (noteInline) {
+            paint.setColor(colDim);
+            canvas.drawText(note, cursor - noteWidth, y, paint);
         }
     }
 

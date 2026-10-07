@@ -89,6 +89,20 @@ class HudTest {
     }
 
     @Test
+    void theDimmedLineAnswersIsItWorking() {
+        String plain = Hud.labelLine(12, 300, 0, 0);
+        assertTrue(plain.startsWith("已拍 12 / 300"), plain);
+        assertFalse(plain.contains("跳过"), "no holes means no such word");
+
+        String odd = Hud.labelLine(12, 300, 1, 2);
+        assertTrue(odd.contains("跳过 1"), odd);
+        assertTrue(odd.contains("未核实 2"), odd);
+
+        String endless = Hud.labelLine(42, Plan.FRAMES_UNLIMITED, 0, 0);
+        assertFalse(endless.contains("/"), "an endless run has no denominator: " + endless);
+    }
+
+    @Test
     void faultsAreNamedInTheUsersWordsNotThePlatforms() {
         Plan plan = new Plan();
         Engine engine = new Engine(plan);
@@ -119,10 +133,14 @@ class HudTest {
     }
 
     @Test
-    void theLegendNamesBothHoldActions() {
+    void theLegendNamesTheKeysThatDoSomethingOnTheirOwn() {
         String legend = Hud.legend();
-        assertTrue(legend.contains("演练"), legend);
-        assertTrue(legend.contains("屏显"), legend);
+        assertTrue(legend.contains("换行"), legend);
+        assertTrue(legend.contains("开始"), legend);
         assertTrue(legend.contains("暂停"), legend);
+
+        // Hold actions are deliberately absent (PLAN §4.1 item 6): they are for the people who go looking.
+        // Adding them back is how this row grew long enough to be drawn through the font note next to it.
+        assertFalse(legend.contains("长按"), legend);
     }
 }
