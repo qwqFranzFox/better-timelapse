@@ -238,6 +238,26 @@ public final class LogLines {
                 + " action=" + text(action, "?") + " said=" + text(said, "ok");
     }
 
+    /**
+     * A decision this app made about the panel, with the reason, before it acts on it.
+     *
+     * <p>Its own line because a feature that reports nothing is indistinguishable from a feature that is not
+     * there, and this one has already been in exactly that state twice: once when the device name was wrong, and
+     * once when the dark window was armed at a moment when the answer was always no. The row on screen said
+     * 每张之后关屏 while the file said nothing at all, and a reader could not tell "the call failed" from "the
+     * call was never made".
+     *
+     * <p>{@code why} is the first condition that decided it: {@code armed}, {@code row-off} (the user has the
+     * feature switched off), {@code unsupported} (this body cannot switch its display), {@code no-room} (the
+     * interval is too short to fit the switch), {@code in-flight} (a frame is being taken), {@code not-running}
+     * or {@code no-frame} (there is no next frame to come back for).
+     */
+    public static String panelWhy(String action, String why, long atMs) {
+        return "panel action=" + text(action, "?")
+                + " why=" + text(why, "?")
+                + " at=" + rel(atMs);
+    }
+
     /** A row the user turned, and whether that moved the timetable (docs/DECISIONS.md A22). */
     public static String planEdit(int row, String value, boolean rebased) {
         return "plan-edit row=" + rowName(row) + " value=" + text(value, "?")

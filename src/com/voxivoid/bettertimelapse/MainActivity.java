@@ -1091,7 +1091,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void armPanelOff() {
         handler.removeCallbacks(onPanelOff);
-        if (!panelShouldDarken()) return;
+        String why = panelRefusal();
+        if (why.length() > 0) {
+            log(LogLines.panelWhy("arm", why, runStartMs()));
+            return;
+        }
+        log(LogLines.panelWhy("arm", "armed", runStartMs()));
         handler.postDelayed(onPanelOff, Frames.panelOffDelayMs(engine.plan()));
     }
 
@@ -1109,6 +1114,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         long due = engine.nextDueMs();
         long wakeAt = Frames.panelWakeAtMs(engine.plan(), now(), due);
         if (wakeAt == Schedule.NONE) {
+            // No next frame to come back for. The wake is still what happens -- a finished run must not leave a
+            // black screen -- but the log says why the arm had nothing to pair with.
+            log(LogLines.panelWhy("wake", "no-frame", runStartMs()));
             wakePanel();
             return;
         }
@@ -1117,16 +1125,37 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
 
     /** Whether the panel may be darkened at all right now. */
     private boolean panelShouldDarken() {
-        if (!engine.plan().panelOff()) return false;
-        if (engine.state() != Engine.ARMED && engine.state() != Engine.WAITING) return false;
-        if (screen.isOff()) return true;                    // already dark: only the wake matters
-        return screen.supported() && Frames.panelStaysOff(engine.plan());
+        return panelRefusal().length() == 0;
+    }
+
+    /**
+     * Why the panel may not be darkened, or an empty string when it may.
+     *
+     * <p>One function so that the answer and the reason for it cannot disagree, and so that the reason can be
+     * written to the log. Every condition here has been the whole bug at least once: the row switched off, a
+     * body without the call, an interval with no room for two switches, a frame in flight, a run that is not a
+     * run. When this feature does nothing, this string is the answer to "which one was it" — and finding that
+     * out from a camera has cost four rounds so far.
+     */
+    private String panelRefusal() {
+        if (!engine.plan().panelOff()) return "row-off";
+        if (!screen.supported()) return "unsupported";
+        if (!Frames.panelStaysOff(engine.plan())) return "no-room";
+        if (screen.isOff()) return "";                      // already dark: only the wake matters
+        if (engine.state() != Engine.ARMED && engine.state() != Engine.WAITING) return "in-flight";
+        return "";
     }
 
     private final Runnable onPanelOff = new Runnable() {
         @Override
         public void run() {
-            if (!panelShouldDarken()) return;
+            String late = panelRefusal();
+            if (late.length() > 0) {
+                // Refused at the last moment, which is a different fact from refused when it was armed: the
+                // frame arrived early, or the run was paused while the timer was in the air.
+                log(LogLines.panelWhy("off", late, runStartMs()));
+                return;
+            }
             if (!screen.off()) {
                 // A screen that will not switch off is worth saying once, on the evidence line, with the reason
                 // — and never worth retrying per frame.
