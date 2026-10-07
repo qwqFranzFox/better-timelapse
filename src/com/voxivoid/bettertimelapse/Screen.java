@@ -47,10 +47,22 @@ public final class Screen {
         return api.graphicsOutput(visible);
     }
 
-    /** What the body says its active output is: the answer to "did the switch take". */
+    /** What the body says its active output is right now. */
     public String activeDevice() {
         return api.activeDevice();
     }
+
+    /**
+     * What the body said its active output was immediately before the last switch.
+     *
+     * <p>Read at the moment it is a fact rather than a race: asked after a switch, this body has answered with
+     * nothing often enough to show up in the session log as an {@code on} line with no {@code active=} on it.
+     */
+    public String wasActiveDevice() {
+        return wasActive;
+    }
+
+    private String wasActive = "";
 
     /** Every device the body reports as attached, for the case where the panel is not among them. */
     public String activeDevices() {
@@ -72,6 +84,7 @@ public final class Screen {
      */
     public boolean off() {
         if (off) return true;
+        wasActive = api.activeDevice();
         // Both, in this order, because either alone was measured not to be enough on this body: the output
         // switch says which device the body should drive, and the graphics call says whether this app's own
         // layer is drawn there. The graphics call is allowed to fail — a body without it still gets the switch
@@ -91,6 +104,7 @@ public final class Screen {
      * key that explains it. Failing to come back is the one failure here the user cannot work around.
      */
     public boolean on() {
+        wasActive = api.activeDevice();
         // The graphics come back first: the app's layer keeps rendering either way, and showing a frame of the
         // panel is a better first thing to see than whatever the body had on the glass.
         api.graphicsOutput(true);

@@ -178,10 +178,10 @@ public final class DisplayApi {
     /**
      * What the body says its active display output is, or an empty string when it will not say.
      *
-     * <p>Read straight after a switch, because "the call returned and did not throw" is not the same claim as
-     * "the output changed": the first version of this feature logged a successful off and left the user looking
-     * at a lit screen, which is the difference between an API that answered and a panel that obeyed. The body
-     * has an answer to that and this asks for it.
+     * <p>Read <em>before</em> a switch and not after it: the question it answers is "what was the output until
+     * now", and a read taken after the call came back empty on this body often enough to be visible in the log
+     * as an {@code on} line with no {@code active=} on it. Before the call it is a fact; after the call it is a
+     * race with the firmware.
      */
     public String activeDevice() {
         if (!supported() || !open()) return "";

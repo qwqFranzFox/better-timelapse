@@ -1199,7 +1199,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // it -- the body refuses a capture without a live stream, so the pair is not optional.
             camera.stopPreview();
             log(LogLines.preview("stop", "panel-dark"));
-            log(LogLines.panel("off", screen.working(), screen.activeDevice(), screen.problem()));
+            log(LogLines.panel("off", screen.working(), screen.wasActiveDevice(), screen.problem()));
         }
     };
 
@@ -1222,7 +1222,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         handler.removeCallbacks(onPanelOff);
         handler.removeCallbacks(onPanelOffAsk);
         if (screen.isOff()) {
-            if (screen.on()) log(LogLines.panel("on", screen.working(), screen.activeDevice(), screen.problem()));
+            if (screen.on()) log(LogLines.panel("on", screen.working(), screen.wasActiveDevice(), screen.problem()));
         }
         // The preview comes back whenever a panel is about to be looked at, and never only when this class
         // believes the screen was dark. Switching a display output can leave the stream stopped, and this body
