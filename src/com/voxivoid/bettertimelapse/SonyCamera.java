@@ -462,16 +462,38 @@ public final class SonyCamera {
         try {
             Class<?> controlClass = Class.forName(REVIEW_CONTROL);
             reviewControl = controlClass.newInstance();
-            Object result = controlClass.getMethod("setPictureReviewTime", int.class)
-                    .invoke(reviewControl, 0);
-            if (result instanceof Boolean && !((Boolean) result)) {
-                return finishReviewInstall("time=0-refused");
-            }
-            reviewMode = "time=0";
-            return finishReviewInstall(reviewMode);
         } catch (Throwable t) {
             reviewProblem = shortName(t);
             reviewControl = null;
+            return false;
+        }
+        // Two ways to ask for no review, and the order is deliberate: a zero review time first, because it is
+        // the direct statement of what is wanted, and `cancelAutoPictureReview` after it. On this body the
+        // first threw a NullPointerException from inside its own object -- reported, not hidden -- so the second
+        // is tried rather than the feature being declared impossible. Both are reflected: which one a body
+        // accepts is a fact about the body, and the log records which it was.
+        if (askReviewControl("setPictureReviewTime", new Class<?>[] { int.class }, new Object[] { 0 })) {
+            return finishReviewInstall("time=0");
+        }
+        if (askReviewControl("cancelAutoPictureReview", new Class<?>[] {}, new Object[] {})) {
+            return finishReviewInstall("cancelled");
+        }
+        if (reviewProblem.length() == 0) reviewProblem = "no review call accepted";
+        reviewControl = null;
+        return false;
+    }
+
+    /** One attempt on the review control, recording why it failed rather than only that it did. */
+    private boolean askReviewControl(String method, Class<?>[] types, Object[] args) {
+        try {
+            Object result = reviewControl.getClass().getMethod(method, types).invoke(reviewControl, args);
+            if (result instanceof Boolean && !((Boolean) result)) {
+                reviewProblem = method + " refused";
+                return false;
+            }
+            return true;
+        } catch (Throwable t) {
+            reviewProblem = method + ": " + shortName(t);
             return false;
         }
     }

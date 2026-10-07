@@ -315,7 +315,7 @@ public final class Frames {
      * hiding it and saves no backlight worth counting. A plan that cannot stay dark for this long keeps its
      * panel lit, and the row says so.
      */
-    public static final long PANEL_MIN_DARK_MS = 500;
+    public static final long PANEL_MIN_DARK_MS = Math.max(500, 2 * PANEL_TRANSITION_MS);
 
     /**
      * Whether this plan can darken the panel at all.
@@ -330,6 +330,12 @@ public final class Frames {
         return plan.intervalMs() - PANEL_OFF_AFTER_MS - panelLitMs(plan) >= PANEL_MIN_DARK_MS;
     }
 
+    /** The dark window a plan would actually get, in milliseconds, or {@code 0} when it gets none. */
+    public static long panelDarkMs(Plan plan) {
+        if (!panelStaysOff(plan)) return 0;
+        return plan.intervalMs() - PANEL_OFF_AFTER_MS - panelLitMs(plan);
+    }
+
     /**
      * How long the panel is lit before each frame — the stretch in which it is worth having a screen at all.
      *
@@ -339,7 +345,15 @@ public final class Frames {
      * is dark for everything between the two.
      */
     public static long panelLitMs(Plan plan) {
-        return Math.max(PANEL_WAKE_BEFORE_MS, plan.intervalMs() / 4);
+        // The lit stretch before a frame is now a bound and not a fraction of the plan. It used to be
+        // max(700ms, interval/4), which on this body's 10s interval is 2.5 seconds of light before every frame
+        // -- and measured on the camera, that is what the user sees: dark for 4 seconds, then the panel back
+        // for the remaining 6. A quarter of the interval is not a reason to light a screen at night.
+        //
+        // So it is the floor, capped so a very long interval cannot turn it into something else: enough time
+        // for the display switch, the surface and the preview the body needs before a shutter. 700 ms is a
+        // first value for exactly that, and the frame's own lateness is what tests it (A44).
+        return Math.min(PANEL_WAKE_BEFORE_MS, Math.max(1, plan.intervalMs() / 4));
     }
 
     /**
