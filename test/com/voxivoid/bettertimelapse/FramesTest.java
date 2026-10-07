@@ -32,6 +32,56 @@ class FramesTest {
     }
 
     @Test
+    void aPlanThatFitsIsNotHeldBack() {
+        // The bug this test exists for: a rename swallowed the "everything is fine" branch, so every plan was
+        // refused with 间隔 X 短于本机身所需的 3.7s whatever X was, on a camera, because the decision lived in
+        // the activity where nothing tests it.
+        Plan p = plan(5000, 10);                                     // settle 1200 → floor 3700
+        p.set(Plan.ROW_SETTLE, 1);
+
+        Frames.Preflight fits = Frames.preflight(p, 50, true, 0);
+        assertTrue(fits.fits(), "5 s is longer than the 3.7 s this plan needs");
+        assertEquals("", Hud.preflightProblem(p, fits));
+
+        p.set(Plan.ROW_INTERVAL, 3700);
+        assertTrue(Frames.preflight(p, 50, true, 0).fits(), "exactly the floor is enough");
+
+        p.set(Plan.ROW_INTERVAL, 3699);
+        assertFalse(Frames.preflight(p, 50, true, 0).fits(), "one millisecond under is under");
+    }
+
+    @Test
+    void thePreflightSaysWhichFloorThePlanIsUnder() {
+        Plan p = plan(3000, 10);
+        p.set(Plan.ROW_SETTLE, 0);                                   // floor 3300
+
+        // Nothing measured, a short exposure: the shutter's own window is what binds.
+        Frames.Preflight shutter = Frames.preflight(p, 50, false, 0);
+        assertEquals(Frames.SHUTTER, shutter.reason);
+        assertEquals(3300, shutter.shortestMs);
+
+        // A four-second exposure with the body's dark frame is eight, which is the number to say out loud.
+        Frames.Preflight exposure = Frames.preflight(p, 4000, true, 0);
+        assertEquals(Frames.EXPOSURE, exposure.reason);
+        assertEquals(8200, exposure.shortestMs);
+        assertTrue(Hud.preflightProblem(p, exposure).contains("曝光 4s"), Hud.preflightProblem(p, exposure));
+        assertTrue(Hud.preflightProblem(p, exposure).contains("降噪"), Hud.preflightProblem(p, exposure));
+
+        // A refusal measured the body at six seconds: that beats both of the others and says so.
+        Frames.Preflight measured = Frames.preflight(p, 50, false, 6000);
+        assertEquals(Frames.MEASURED, measured.reason);
+        assertEquals(6000, measured.shortestMs);
+        assertTrue(Hud.preflightProblem(p, measured).contains("实测"), Hud.preflightProblem(p, measured));
+    }
+
+    @Test
+    void aPlanThatFitsSaysNothingAtAll() {
+        Plan p = plan(10_000, 10);
+        assertEquals("", Hud.preflightProblem(p, Frames.preflight(p, 4000, true, 0)));
+        assertEquals("", Hud.preflightProblem(p, Frames.preflight(p, Frames.UNKNOWN, false, 0)));
+    }
+
+    @Test
     void thePressWindowIsTheBodysOwnTimeWhenTheIntervalCanAffordIt() {
         assertEquals(Frames.PRESS_MS, Frames.pressWindowMs(plan(5000, 10)));
         assertEquals(Frames.PRESS_MS, Frames.pressWindowMs(plan(3000, 10)));

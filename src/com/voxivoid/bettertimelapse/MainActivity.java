@@ -689,28 +689,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * <p>Two constraints, and the longer one wins: what the shutter and the body need between frames, and what
      * the exposure plus — with noise reduction on — its dark frame occupies the camera for.
      */
-    private String preflightProblem() {
-        Plan plan = engine.plan();
-        long measured = body.shortestIntervalMs(plan);
-        long planned = Frames.shortestIntervalMs(plan, exposureMs, longExposureNr);
-        long shortest = Math.max(measured, planned);
-        StringBuilder why = new StringBuilder();
-        why.append("\u95f4\u9694 ").append(Steps.shortMs(plan.intervalMs()))                 // 间隔 <n>
-                .append(" \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 ")              // 短于本机身所需的
-                .append(Steps.shortMs((int) shortest));                                     // <n>
-        if (planned >= measured && exposureMs > 0) {
-            // The number the user can do something about: it is their shutter speed, and the doubling is the
-            // body's own noise reduction rather than anything this app chose.
-            why.append("\uff08\u66dd\u5149 ").append(Steps.shortMs((int) exposureMs));       // （曝光 <n>
-            if (longExposureNr) why.append(" + \u964d\u566a");                              // + 降噪
-            why.append("\uff09");                                                           // ）
-        } else if (measured > planned) {
-            why.append("\uff08\u5b9e\u6d4b\uff09");                                        // （实测）
-        }
-        why.append("\uff1a\u76f8\u673a\u4f1a\u6765\u4e0d\u53ca");                       // ：相机会来不及
-        return why.toString();
-    }
-
     /**
      * Hold the start back once, and say why.
      *
@@ -725,23 +703,24 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      *
      * @return true when the run may start.
      */
-    private boolean startAllowed(String problem) {
+    private boolean startAllowed(String problem, Frames.Preflight preflight) {
         if (problem.length() == 0) {
-            log(LogLines.preflight(engine.plan().intervalMs(), 0, exposureMs, longExposureNr, "ok", "ok"));
+            log(LogLines.preflight(engine.plan().intervalMs(), preflight.shortestMs, exposureMs,
+                    longExposureNr, "ok", "ok"));
             return true;
         }
         if (startOverride) {
             startOverride = false;
-            log(LogLines.preflight(engine.plan().intervalMs(), 0, exposureMs, longExposureNr,
-                    "override", problem));
+            log(LogLines.preflight(engine.plan().intervalMs(), preflight.shortestMs, exposureMs,
+                    longExposureNr, "override", problem));
             return true;
         }
         startOverride = true;
         handler.removeCallbacks(onOverrideExpiry);
         handler.postDelayed(onOverrideExpiry, OVERRIDE_MS);
         panel.setEvidence(problem + "  \u518d\u6309\u4e2d\u5fc3\u4ecd\u7167\u62cd");       // 再按中心仍照拍
-        log(LogLines.preflight(engine.plan().intervalMs(), 0, exposureMs, longExposureNr,
-                "refused", problem));
+        log(LogLines.preflight(engine.plan().intervalMs(), preflight.shortestMs, exposureMs,
+                longExposureNr, "refused", problem));
         panel.invalidate();
         return false;
     }
@@ -1392,7 +1371,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         applyPlanToCamera();
                         // Held back once when the plan asks for more than this body has: the reason goes on the
                         // screen, the second press goes ahead, and the file records which of the two it was.
-                        if (!startAllowed(preflightProblem())) return true;
+                        Frames.Preflight preflight = Frames.preflight(engine.plan(), exposureMs,
+                                longExposureNr, body.shortestIntervalMs(engine.plan()));
+                        if (!startAllowed(Hud.preflightProblem(engine.plan(), preflight), preflight)) return true;
                         runStartMs = now();
                         loggedSkipped = 0;
                         loggedState = Engine.IDLE;

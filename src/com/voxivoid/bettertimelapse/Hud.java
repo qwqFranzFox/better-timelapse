@@ -317,6 +317,30 @@ public final class Hud {
     }
 
     /**
+     * What to say about a plan that does not fit, or an empty string when it does.
+     *
+     * <p>The words are here and the arithmetic is in {@link Frames}: the sentence has to name the thing the
+     * user can change — their shutter speed with the body's own noise reduction, or a floor that refusals
+     * measured rather than this app guessed.
+     */
+    public static String preflightProblem(Plan plan, Frames.Preflight preflight) {
+        if (preflight.fits()) return "";
+        StringBuilder b = new StringBuilder();
+        b.append("\u95f4\u9694 ").append(Steps.shortMs(plan.intervalMs()))                 // 间隔 <n>
+                .append(" \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 ")              // 短于本机身所需的
+                .append(Steps.shortMs((int) preflight.shortestMs));
+        if (preflight.reason == Frames.EXPOSURE) {
+            b.append("\uff08\u66dd\u5149 ").append(Steps.shortMs((int) preflight.exposureMs));   // （曝光 <n>
+            if (preflight.longExposureNr) b.append(" + \u964d\u566a");                          // + 降噪
+            b.append("\uff09");                                                              // ）
+        } else if (preflight.reason == Frames.MEASURED) {
+            b.append("\uff08\u5b9e\u6d4b\uff09");                                          // （实测）
+        }
+        b.append("\uff1a\u76f8\u673a\u4f1a\u6765\u4e0d\u53ca");                       // ：相机会来不及
+        return b.toString();
+    }
+
+    /**
      * The one line the dimmed label mode shows while a run is on.
      *
      * <p>Not the plan summary: with the screen reduced to a single line the question is never "what did I

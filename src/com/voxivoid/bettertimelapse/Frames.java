@@ -196,6 +196,62 @@ public final class Frames {
     }
 
     /**
+     * Whether a plan can be shot on this body, and if not, which of the three floors it is under.
+     *
+     * <p>The floors are different things and only one of them is a fact about the camera alone: the shutter
+     * needs its press window and the plan its settle time; the frame occupies the body for the exposure plus,
+     * with noise reduction on, a dark frame of the same length; and refusals measure what the body actually
+     * needs, which is not known until something has been refused.
+     *
+     * <p>This decision lived in the activity for one build and lost its "everything is fine" branch to a
+     * rename, which meant every plan was held back with 间隔 X 短于本机身所需的 3.7s no matter what X was —
+     * shipped, on a camera, because no test covered it. It is here now, with tests, which is where this
+     * project's own rule says a decision belongs.
+     */
+    public static final class Preflight {
+        /** Why the plan does not fit, or {@link #NONE}. */
+        public int reason = NONE;
+        /** The longest of the floors in play: the number the plan has to reach. */
+        public long shortestMs;
+        public long exposureMs = UNKNOWN;
+        public boolean longExposureNr;
+
+        public boolean fits() {
+            return reason == NONE;
+        }
+    }
+
+    public static final int NONE = 0, SHUTTER = 1, EXPOSURE = 2, MEASURED = 3;
+
+    /**
+     * Decide whether the plan fits, from the three floors and the exposure.
+     *
+     * @param measuredFloorMs what refusals have proven, or {@link BodyCycle#UNKNOWN}.
+     */
+    public static Preflight preflight(Plan plan, long exposureMs, boolean longExposureNr, long measuredFloorMs) {
+        Preflight out = new Preflight();
+        out.exposureMs = exposureMs;
+        out.longExposureNr = longExposureNr;
+
+        long fromShutter = shortestIntervalMs(plan);
+        long fromExposure = exposureMs > 0
+                ? occupancyMs(exposureMs, longExposureNr) + EXPOSURE_MARGIN_MS : 0;
+        long fromMeasured = measuredFloorMs > 0 ? measuredFloorMs : 0;
+
+        out.shortestMs = Math.max(fromShutter, Math.max(fromExposure, fromMeasured));
+        if (plan.intervalMs() >= out.shortestMs) {
+            out.reason = NONE;
+        } else if (fromMeasured > fromShutter && fromMeasured >= fromExposure) {
+            out.reason = MEASURED;
+        } else if (fromExposure > fromShutter) {
+            out.reason = EXPOSURE;
+        } else {
+            out.reason = SHUTTER;
+        }
+        return out;
+    }
+
+    /**
      * Frames the card can still take, from the free space and a measured frame size. A floor, and
      * deliberately so: an estimate that runs out early costs a re-shoot, one that runs out late costs
      * the pictures.
