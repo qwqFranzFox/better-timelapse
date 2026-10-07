@@ -305,6 +305,66 @@ public final class SonyCamera {
         return Frames.UNKNOWN;
     }
 
+    /**
+     * Everything this app wants out of one read of the parameter set.
+     *
+     * <p>Read as a unit because reading is not free: this body reports 298 live parameters, and
+     * {@code getParameters()} copies the lot. The first real session log shows what that costs — a run whose
+     * first frame was skipped for being 2147 ms late, which is a parameter read landing on top of the moment
+     * a frame was due. Four separate readers each fetching the whole set, every five seconds and again at
+     * every run start, was four times the price for the same answer.
+     */
+    public static final class Parameters {
+        public long exposureMs = Frames.UNKNOWN;
+        public boolean longExposureNr;
+        public int silentShutter = Frames.UNKNOWN;
+        public int driveMode = Frames.UNKNOWN;
+        /** How long the read itself took, which is the number that explains a late frame. */
+        public long readMs;
+    }
+
+    /** Read the parameter set once and answer everything from it. */
+    public Parameters readParameters() {
+        Parameters out = new Parameters();
+        if (camera == null) return out;
+        long began = android.os.SystemClock.elapsedRealtime();
+        try {
+            android.hardware.Camera.Parameters params = camera.getParameters();
+            out.exposureMs = Frames.exposureMs(params.get("shutter-speed-nume"),
+                    params.get("shutter-speed-deno"));
+            out.longExposureNr = isOn(params.get("long-exposure-nr"));
+            out.silentShutter = tri(params.get("silent-shutter-mode"));
+            out.driveMode = drive(params.get("drive-mode"));
+        } catch (Throwable t) {
+            lastError = shortName(t);
+        }
+        out.readMs = android.os.SystemClock.elapsedRealtime() - began;
+        return out;
+    }
+
+    private static boolean isOn(String value) {
+        if (value == null) return false;
+        String v = value.trim().toLowerCase(java.util.Locale.US);
+        return "true".equals(v) || "on".equals(v) || "1".equals(v);
+    }
+
+    private static int tri(String value) {
+        if (value == null) return Frames.UNKNOWN;
+        String v = value.trim().toLowerCase(java.util.Locale.US);
+        if ("true".equals(v) || "on".equals(v) || "1".equals(v)) return 1;
+        if ("false".equals(v) || "off".equals(v) || "0".equals(v)) return 0;
+        return Frames.UNKNOWN;
+    }
+
+    private static int drive(String value) {
+        if (value == null) return Frames.UNKNOWN;
+        String v = value.trim().toLowerCase(java.util.Locale.US);
+        if (v.startsWith("single")) return Plan.DRIVE_SINGLE;
+        if (v.startsWith("burst")) return Plan.DRIVE_BURST;
+        if (v.startsWith("bracket")) return Plan.DRIVE_BRACKET3;
+        return Frames.UNKNOWN;
+    }
+
     /** Why the preview is not running, or empty. Without one, a capture is refused. */
     public String previewProblem() {
         return previewProblem;

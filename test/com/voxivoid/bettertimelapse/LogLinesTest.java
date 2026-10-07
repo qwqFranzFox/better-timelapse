@@ -18,9 +18,9 @@ class LogLinesTest {
 
     @Test
     void aShotLineCarriesTheFactsTheTimetableIsJudgedBy() {
-        String line = LogLines.shot(7, 30_000, 120, 4200, 916);
+        String line = LogLines.shot(7, 8, 30_000, 120, 4200, 916);
 
-        assertTrue(line.startsWith("shot 7 "), line);
+        assertTrue(line.startsWith("shot press=7 moment=8 "), line);
         assertTrue(line.contains("at=+30.000s"), line);
         assertTrue(line.contains("late=120ms"), line);
         assertTrue(line.contains("window=4200ms"), line);
@@ -29,7 +29,7 @@ class LogLinesTest {
 
     @Test
     void aFrameWithNoCallbackSaysSoRatherThanClaimingZero() {
-        assertTrue(LogLines.shot(1, 0, 0, 2500, Frames.UNKNOWN).contains("cb=-"),
+        assertTrue(LogLines.shot(1, 1, 0, 0, 2500, Frames.UNKNOWN).contains("cb=-"),
                 "no callback is not a callback of zero");
     }
 
@@ -108,6 +108,32 @@ class LogLinesTest {
         assertEquals("+12.345s", LogLines.rel(12_345));
         assertEquals("+3600.000s", LogLines.rel(3_600_000));
         assertEquals("?", LogLines.rel(Frames.UNKNOWN));
+    }
+
+    @Test
+    void theEndOfARunDoesNotClaimAVerdictThatIsStillPending() {
+        String line = LogLines.end("done", 1, 0, 4, 1);
+        assertTrue(line.contains("pending=1"), line);
+        assertFalse(line.contains("unverified="), "a pending verdict is not a missing file: " + line);
+
+        // The summary is the line that waits for the last verdict, and the first real log is why it exists:
+        // END said verified=0 pending=1 one line above verdict result=ok.
+        String summary = LogLines.summary(1, 1, 4, 0, 12_992);
+        assertTrue(summary.contains("landed=1"), summary);
+        assertTrue(summary.contains("verified=1"), summary);
+        assertTrue(summary.contains("missed=0"), summary);
+        assertTrue(summary.contains("skipped=4"), summary);
+        assertTrue(summary.contains("elapsed=12.992s"), summary);
+    }
+
+    @Test
+    void theLogNamesWhichClockIsWhich() {
+        // A press and a moment are different counters, and the first real log mixed them: four skips and one
+        // shot of a five-frame plan could not be told apart from five frames.
+        assertTrue(LogLines.shot(1, 3, 1000, 17, 2500, Frames.UNKNOWN).startsWith("shot press=1 moment=3 "));
+        assertTrue(LogLines.skip(2, 1000, 900, 3000).startsWith("skip moment=2 "));
+        assertTrue(LogLines.verdict(1, 648, 1, true, 1636).startsWith("verdict press=1 "));
+        assertTrue(LogLines.refused(4, 1000, 1, 5000, "err").startsWith("refused press=4 "));
     }
 
     @Test

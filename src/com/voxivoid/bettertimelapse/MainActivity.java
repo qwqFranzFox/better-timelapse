@@ -100,6 +100,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
 
     /** The press window the current frame was given, and the body's callback for it, for the log. */
     private long pressWindowUsedMs;
+
+    /** How late the current frame was against its own moment, and which moment that was. */
+    private long lateAtFireMs;
+    private int lateMomentIndex;
     private long lastCallbackMs = Frames.UNKNOWN;
 
     /** When the current run started, on the monotonic clock: every {@code at=} in the log is relative to it. */
@@ -108,6 +112,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** How much of the run's own history the log has already been told. */
     private int loggedSkipped;
     private int loggedState = Engine.IDLE;
+    private boolean summaryLogged;
 
     /** Whether this app is the one holding the exposure lock. AEL cannot be read back, so it is tracked. */
     private boolean aelLockedByUs;
@@ -462,6 +467,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void retryDeviceDump() {
         if (DevDump.onCard() || dumpAttempts >= DUMP_ATTEMPTS_MAX) return;
+        // Six card paths, six failures, every one of them an open() on the card: worth doing, not worth doing
+        // while a run is trying to keep time.
+        if (engine.midRun()) return;
         writeDeviceDump();
     }
 
@@ -636,18 +644,21 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private void logRunStart() {
         Plan plan = engine.plan();
         Session.open(this, LogLines.header());
-        log(LogLines.schema());
-        log(LogLines.body(SonyCamera.property("model.name"), SonyCamera.property("version.platform"),
-                exposureMs, longExposureNr, occupancyMs(),
-                Math.max(body.shortestIntervalMs(plan),
-                        Frames.shortestIntervalMs(plan, exposureMs, longExposureNr))));
-        log(LogLines.plan(plan));
-        log(LogLines.start(cardRoot, cardCount, Device.freeBytes(
-                cardRoot.length() == 0 ? null : cardRoot), Device.batteryPercent(this)));
-        log("boot firstframe=" + LogLines.ms(startupMs) + " font=" + LogLines.text(UiFont.route(), "?"));
-        log("paths log=" + LogLines.text(Session.path(), "-")
-                + " dump=" + LogLines.text(DevDump.written(), "-")
-                + " carddump=" + (DevDump.onCard() ? "yes" : "no"));
+        // One append for the header rather than eleven: the log is opened, written and closed per line so that
+        // a run which dies loses at most its last line, and that rule is about frames, not about a header.
+        Session.line(this, LogLines.schema()
+                + "\n" + LogLines.body(SonyCamera.property("model.name"), SonyCamera.property("version.platform"),
+                        exposureMs, longExposureNr, occupancyMs(),
+                        Math.max(body.shortestIntervalMs(plan),
+                                Frames.shortestIntervalMs(plan, exposureMs, longExposureNr)))
+                + "\n" + LogLines.plan(plan)
+                + "\n" + LogLines.start(cardRoot, cardCount, Device.freeBytes(
+                        cardRoot.length() == 0 ? null : cardRoot), Device.batteryPercent(this))
+                + "\n" + "boot firstframe=" + LogLines.ms(startupMs)
+                        + " font=" + LogLines.text(UiFont.route(), "?")
+                + "\n" + "paths log=" + LogLines.text(Session.path(), "-")
+                        + " dump=" + LogLines.text(DevDump.written(), "-")
+                        + " carddump=" + (DevDump.onCard() ? "yes" : "no"));
         if (Session.broken()) {
             // The one thing about the log the user has to know while standing at the camera.
             panel.setLogNote("\u65e5\u5fd7\u5199\u4e0d\u8fdb\uff1a"                     // 日志写不进：
@@ -671,7 +682,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         long measured = body.shortestIntervalMs(plan);
         long planned = Frames.shortestIntervalMs(plan, exposureMs, longExposureNr);
         long shortest = Math.max(measured, planned);
-        if (plan.intervalMs() >= shortest) return;
+        if (plan.intervalMs() >= shortest) {
+            log(LogLines.preflight(plan.intervalMs(), shortest, exposureMs, longExposureNr, "ok"));
+            return;
+        }
         StringBuilder why = new StringBuilder();
         why.append("\u95f4\u9694 ").append(Steps.shortMs(plan.intervalMs()))                 // 间隔 <n>
                 .append(" \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 ")              // 短于本机身所需的
@@ -686,7 +700,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             why.append("\uff08\u5b9e\u6d4b\uff09");                                        // （实测）
         }
         why.append("\uff1a\u76f8\u673a\u4f1a\u6765\u4e0d\u53ca");                       // ：相机会来不及
+        // Both places, because they are read by different people: the screen by whoever is standing at the
+        // camera, the file by whoever reads the run afterwards and wonders why four frames of five are holes.
         panel.setEvidence(why.toString());
+        log(LogLines.preflight(plan.intervalMs(), shortest, exposureMs, longExposureNr, why.toString()));
     }
 
     /**
@@ -768,6 +785,11 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         }
         if (!engine.canFire()) return;
         firedAtMs = now();
+        // How late this frame is against its own moment — read here, because after the press the schedule has
+        // moved on; and the moment's own number, so the log can be lined up with the skips around it.
+        long remaining = engine.remainingMs(firedAtMs);
+        lateAtFireMs = remaining == Schedule.NONE ? 0 : Math.max(0, -remaining);
+        lateMomentIndex = engine.frameIndex() + 1;
 
         if (!camera.isOpen() && !camera.open()) {
             engine.stop(Engine.FAULT_CAMERA, now());
@@ -893,9 +915,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * next cannot make the following frame late.
      */
     private void frameTaken() {
-        int index = engine.fired();
-        log(LogLines.shot(index, now() - runStartMs(), now() - firedAtMs - pressWindowUsedMs,
-                pressWindowUsedMs, lastCallbackMs));
+        // Two index spaces, named: presses are what the app did, moments are what the timetable asked for.
+        // The first real log mixed them, and a reader could not tell 4 skips and 1 shot from 5 frames.
+        log(LogLines.shot(engine.fired(), lateMomentIndex, runStartMs(),
+                lateAtFireMs, pressWindowUsedMs, lastCallbackMs));
         // Taken, and not yet accounted for on the card. This is the state every frame starts in: the
         // count that proves it is written comes back from the worker thread a good part of an interval
         // from now, because a file that is written after the shutter is not there the instant the
@@ -966,6 +989,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             accountForFrames();
             if (lastGained > 0) engine.setLastFile(cardNewest);
             logCard();
+            logSummary();
             retryDeviceDump();
             panel.invalidate();
         }
@@ -1069,7 +1093,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     };
 
     private void pushDeviceStatus() {
-        refreshExposure();
+        // Battery and card space are platform calls and always safe; the camera is not always safe to ask.
+        if (quietMoment()) refreshExposure();
         long perFrame = measuredFrameBytes;
         if (perFrame <= 0) perFrame = cardNewestBytes;
         if (perFrame <= 0) perFrame = FALLBACK_FRAME_BYTES;
@@ -1080,15 +1105,44 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /**
      * Ask the body how long its frames are, and remember the answer.
      *
-     * <p>Not per frame: reading parameters means copying the whole parameter set, which is not free on this
-     * platform, and the shutter speed is something a person changes between runs rather than during one. Every
-     * five seconds and at every run start is often enough for the two places it matters.
+     * <p>One read of the parameter set, not four: see {@link SonyCamera.Parameters}. The read is measured and
+     * logged, because a session log showed a frame skipped for being two seconds late and the suspect is
+     * exactly this call.
+     *
+     * <p>And it never happens near a frame's own moment. Five seconds is the interval because nothing here
+     * changes quickly, and a status line that is a second stale costs nothing while a frame that is a second
+     * late costs a hole in the film.
      */
     private void refreshExposure() {
         if (!camera.isOpen()) return;
-        exposureMs = camera.exposureMs();
-        longExposureNr = camera.longExposureNr();
+        SonyCamera.Parameters read = camera.readParameters();
+        if (read.exposureMs != Frames.UNKNOWN) exposureMs = read.exposureMs;
+        longExposureNr = read.longExposureNr;
+        if (read.readMs > PARAMETER_READ_WORTH_SAYING_MS) {
+            log(LogLines.parameters(read.readMs));
+        }
     }
+
+    /** A parameter read slower than this goes in the log: it is the cost that explains a late frame. */
+    private static final long PARAMETER_READ_WORTH_SAYING_MS = 200;
+
+    /**
+     * Whether the camera may be asked anything right now.
+     *
+     * <p>Reading the parameters means copying 298 of them, and the first real log has a frame that was
+     * skipped for being 2147 ms late because a read landed on the moment it was due. So the app keeps its
+     * hands off the camera for the last stretch before a frame and while one is in flight: status that is a
+     * little stale is worth more than a frame that is late.
+     */
+    private boolean quietMoment() {
+        if (!camera.isOpen()) return false;
+        if (engine.state() == Engine.EXPOSING) return false;
+        long remaining = engine.remainingMs(now());
+        return remaining == Schedule.NONE || remaining > QUIET_MS;
+    }
+
+    /** How long before a frame's moment the app stops asking the camera anything. */
+    private static final long QUIET_MS = 1500;
 
     /** How long one frame occupies the body: the exposure, doubled when it takes a dark frame too. */
     private long occupancyMs() {
@@ -1117,6 +1171,22 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             log(LogLines.end("done", engine.landed(), confirmed(), engine.skipped(), engine.unverified()));
         }
         loggedState = state;
+    }
+
+    /**
+     * The run's account of itself, once there is nothing left to wait for.
+     *
+     * <p>The {@code END} line is written the moment the run ends, which can be a second and a half before the
+     * card has been asked about its last frame — the first real log said {@code END … verified=0 pending=1}
+     * directly above {@code verdict … result=ok}. This is the line that waits, and it is the one worth reading
+     * afterwards.
+     */
+    private void logSummary() {
+        if (summaryLogged || engine.midRun()) return;
+        if (engine.state() != Engine.DONE && engine.state() != Engine.FAULT) return;
+        summaryLogged = true;
+        log(LogLines.summary(engine.landed(), confirmed(), engine.skipped(), engine.unverified(),
+                runStartMs()));
     }
 
     /**
@@ -1265,10 +1335,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         runStartMs = now();
                         loggedSkipped = 0;
                         loggedState = Engine.IDLE;
+                        summaryLogged = false;
                         logRunStart();
                         warnIfImpossible();
                     }
                     engine.step(Engine.EV_ENTER, now());
+                    log(LogLines.runStart(runStartMs()));
                     panel.invalidate();
                     pump();
                 }

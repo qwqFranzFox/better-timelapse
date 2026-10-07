@@ -75,8 +75,8 @@ public final class LogLines {
      * @param windowMs how long the shutter was held; {@code >= exposure} when the exposure was readable.
      * @param callbackMs the body's own shutter callback, or {@link Frames#UNKNOWN} when none came.
      */
-    public static String shot(int index, long atMs, long lateMs, long windowMs, long callbackMs) {
-        return "shot " + index
+    public static String shot(int press, int moment, long atMs, long lateMs, long windowMs, long callbackMs) {
+        return "shot press=" + press + " moment=" + moment
                 + " at=" + rel(atMs)
                 + " late=" + ms(lateMs)
                 + " window=" + ms(windowMs)
@@ -84,8 +84,8 @@ public final class LogLines {
     }
 
     /** What the card said about a frame, once it had been read. */
-    public static String verdict(int index, int cardCount, int gained, boolean confirmed, long walkMs) {
-        return "verdict " + index
+    public static String verdict(int press, int cardCount, int gained, boolean confirmed, long walkMs) {
+        return "verdict press=" + press
                 + " card=" + count(cardCount)
                 + " gain=" + gained
                 + " result=" + (confirmed ? "ok" : "unverified")
@@ -93,13 +93,14 @@ public final class LogLines {
     }
 
     /** A moment that went by with no frame in it, because the camera was not free in time. */
-    public static String skip(int index, long atMs, long lateMs, long intervalMs) {
-        return "skip " + index + " at=" + rel(atMs) + " late=" + ms(lateMs) + " interval=" + ms(intervalMs);
+    public static String skip(int moment, long atMs, long lateMs, long intervalMs) {
+        return "skip moment=" + moment + " at=" + rel(atMs) + " late=" + ms(lateMs)
+                + " interval=" + ms(intervalMs);
     }
 
     /** A press the camera refused, and what that proved about how long its frames take. */
-    public static String refused(int index, long atMs, int attempt, long busyAtLeastMs, String error) {
-        return "refused " + index + " at=" + rel(atMs) + " attempt=" + attempt
+    public static String refused(int press, long atMs, int attempt, long busyAtLeastMs, String error) {
+        return "refused press=" + press + " at=" + rel(atMs) + " attempt=" + attempt
                 + " busy>=" + ms(busyAtLeastMs)
                 + " err=" + text(error, "?");
     }
@@ -110,10 +111,40 @@ public final class LogLines {
                 + " detail=" + text(detail, "-");
     }
 
-    /** The end of a run, however it ended. */
+    /**
+     * The end of a run, however it ended.
+     *
+     * <p>{@code pending}, not {@code unverified}: a run can end while the card is still being asked about its
+     * last frame, and the first real log said {@code END … verified=0 unverified=1} one line above
+     * {@code verdict … result=ok}. The summary that follows the last verdict is where the final counts
+     * belong.
+     */
     public static String end(String outcome, int landed, int accounted, int skipped, int unverified) {
         return "END outcome=" + text(outcome, "?") + " landed=" + landed + " verified=" + accounted
-                + " skipped=" + skipped + " unverified=" + unverified;
+                + " skipped=" + skipped + " pending=" + unverified;
+    }
+
+    /** The run's own account of itself, written once the last frame has been answered for. */
+    public static String summary(int landed, int accounted, int skipped, int unverified, long elapsedMs) {
+        return "summary landed=" + landed + " verified=" + accounted + " missed=" + unverified
+                + " skipped=" + skipped + " elapsed=" + rel(elapsedMs).substring(1);
+    }
+
+    /** The moment the timetable was armed: every {@code at=} after it is measured from here. */
+    public static String runStart(long atMs) {
+        return "run start at=" + rel(atMs);
+    }
+
+    /** What the app said before the first frame, so a reader of the file sees what the screen said. */
+    public static String preflight(long intervalMs, long shortestMs, long exposureMs, boolean nr, String said) {
+        return "preflight interval=" + ms(intervalMs) + " shortest=" + ms(shortestMs)
+                + " exposure=" + ms(exposureMs) + " nr=" + (nr ? "on" : "off")
+                + " said=" + text(said, "ok");
+    }
+
+    /** One reading of the whole parameter set, and what it cost: the body reports 298 of them. */
+    public static String parameters(long tookMs) {
+        return "parameters read=" + ms(tookMs);
     }
 
     /** Why a run stopped, in the words a log is read in. */
