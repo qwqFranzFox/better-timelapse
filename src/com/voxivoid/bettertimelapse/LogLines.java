@@ -338,6 +338,19 @@ public final class LogLines {
                 + (problem == null || problem.length() == 0 ? "" : " problem=" + text(problem, "?"));
     }
 
+    /**
+     * Whether preview frames are being produced, and why the app changed that.
+     *
+     * <p>The stream is invisible — the panel covers it — but it is not free and not optional, so the two
+     * things worth knowing about it are opposites: it must be running when a shutter is asked for (the body
+     * refuses a capture without it, measured), and it is the largest thing this app keeps the camera doing
+     * while nothing is being photographed. The only way to tell those apart from a log is to write down when it
+     * was stopped and started.
+     */
+    public static String preview(String action, String why) {
+        return "preview action=" + text(action, "?") + " why=" + text(why, "?");
+    }
+
     /** The frames the card never answered for, said in the file the way the panel says it on screen. */
     public static String shortfall(int taken, int accounted) {
         return "shortfall taken=" + taken + " accounted=" + accounted;

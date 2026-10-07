@@ -1194,7 +1194,11 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // (ShootActivity:67-68), and this app had never stopped a preview outside onPause. Doing it in the
             // other order is what broke a run -- a preview stopped for a panel that never went dark is a camera
             // that will not take another frame, and the log of that run has two shots in it and then a pause.
+            // The stream stops with the panel, and it is the largest thing this app keeps the camera doing
+            // between frames. It comes back in wakePanel(), a whole lit stretch before the next shutter needs
+            // it -- the body refuses a capture without a live stream, so the pair is not optional.
             camera.stopPreview();
+            log(LogLines.preview("stop", "panel-dark"));
             log(LogLines.panel("off", screen.working(), screen.activeDevice(), screen.problem()));
         }
     };
@@ -1225,7 +1229,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // will not take a photograph without a live one -- a failure that arrives as `BurstableTakePicture
         // failed`, with nothing in it mentioning the panel (docs/DECISIONS.md A20). Restarting a preview that
         // never stopped costs nothing worth measuring; not restarting one that did costs the rest of the run.
+        boolean wasDown = !camera.previewing();
         camera.resumePreview();
+        if (wasDown) {
+            log(LogLines.preview(camera.previewing() ? "start" : "start-failed",
+                    camera.previewing() ? "before-frame" : camera.previewProblem()));
+        }
     }
 
     // ================================================================ the card, off the UI thread
