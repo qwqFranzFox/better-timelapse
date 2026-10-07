@@ -1,90 +1,207 @@
 package com.voxivoid.bettertimelapse;
 
+import android.content.Context;
 import android.os.Environment;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A file on the card that answers questions the panel cannot.
  *
- * <p>The question this exists for, right now: <em>can this app read the shutter speed?</em> The app's
- * minimum interval wants the exposure in it — a ten-second exposure and a two-second interval cannot both
- * be honoured — and the honest way to find out whether the camera will tell us the exposure is to ask it,
- * not to reason about it. The live parameter API is the cheapest place to ask
- * ({@code Camera.Parameters.flatten()}), the camera's settings store is the other, and
- * {@link SonyCamera#parameterKeys()} has been filtering the parameter list for a key with
- * {@code shutter} in its name since the skeleton was written — with no caller, because there was nowhere
- * to put an answer several screens long.
+ * <p>The question this exists for: <em>can this app read the shutter speed?</em> The minimum interval wants
+ * the exposure in it — a ten-second exposure and a two-second interval cannot both be honoured — and the
+ * honest way to find out whether the camera will say is to ask it rather than to reason about it.
  *
- * <p>So there is somewhere now: a text file, written next to the camera's own tree where a card reader or
- * a USB cable can reach it. The panel keeps showing the two or three facts that fit on it; this is for the
- * rest, and for the parts that only mean something to whoever is reading the whole thing.
+ * <p>The first version wrote to one path, the card root, and the camera refused it: on this platform an app
+ * creating a directory next to {@code DCIM} is not something to count on. So every plausible place is tried
+ * in order, from the platform's own app directory on the card (which exists for exactly this) through the
+ * camera's own tree to the app's private storage — and which one worked, or why none did, is reported rather
+ * than swallowed. A file nobody can retrieve is worth less than knowing that it could not be written.
  *
- * <p>Deliberately not a log: it is overwritten on every launch, so it always describes the camera in front
- * of the user rather than the history of the app. The session log (docs/PLAN.md §5.2) is a different file
- * with a different job.
+ * <p>{@link #attempts()} exists for the failure case: on this camera there is no adb and no way to pull an
+ * app's private files, so when nothing on the card takes the file the panel has to say why, in one line.
+ *
+ * <p>Deliberately not a log: overwritten on every launch, so it describes the camera in front of the user
+ * rather than the history of the app. The session log (docs/PLAN.md §5.2) is a different file with a
+ * different job.
  */
 public final class DevDump {
 
-    /** The folder on the card. Next to the camera's own tree, so a card reader finds it. */
-    public static final String DIR = "bettertimelapse";
-
-    /** The file. One per launch, overwritten. */
-    public static final String NAME = "device.txt";
+    /** The name, in every location it is tried under. */
+    public static final String NAME = "bettertimelapse-device.txt";
 
     private DevDump() {}
 
-    /** Where the dump goes, or an empty string when the card cannot be reached at all. */
-    public static String path() {
+    /** The path that worked, or an empty string. */
+    private static String written = "";
+
+    /** One line per distinct failure reason, for the panel. */
+    private static String attempts = "";
+
+    /** Whether the file landed somewhere the user can actually get at it. */
+    private static boolean onCard;
+
+    /**
+     * Write the report to the first place that takes it.
+     *
+     * @return the path written, or an empty string with {@link #attempts()} saying what was tried.
+     */
+    public static String write(Context context, String body) {
+        written = "";
+        attempts = "";
+        onCard = false;
+        List<String> reasons = new ArrayList<String>();
+
+        List<File> places = places(context);
+        for (int i = 0; i < places.size(); i++) {
+            File file = places.get(i);
+            File dir = file.getParentFile();
+            // Best effort: a directory that cannot be made is not reported on its own, because the write
+            // below fails for the same reason and with a better message.
+            if (dir != null && !dir.isDirectory()) dir.mkdirs();
+            if (writeTo(file, body)) {
+                written = file.getPath();
+                onCard = !isInternal(context, file);
+                return written;
+            }
+            reasons.add(shortReason(lastProblem));
+        }
+        attempts = summarise(reasons);
+        return "";
+    }
+
+    /** The path that worked, or an empty string. */
+    public static String written() {
+        return written;
+    }
+
+    /** Whether the file is somewhere a card reader or a USB cable can reach. */
+    public static boolean onCard() {
+        return onCard;
+    }
+
+    /** What was tried and why it failed, as {@code Permission denied (4) Read-only file system (2)}. */
+    public static String attempts() {
+        return attempts;
+    }
+
+    // ---------------------------------------------------------------- the places, in order
+
+    /**
+     * Where to try, best first.
+     *
+     * <p>The platform's own directory for this app on the card comes first: it exists for this purpose and
+     * the platform creates it. Then the camera's own tree — {@code DCIM}, where files are demonstrably
+     * written, and written as a file rather than a directory so nothing has to be created. Then the two
+     * spellings of the card root, then private storage, which always works and cannot be retrieved.
+     */
+    private static List<File> places(Context context) {
+        List<File> out = new ArrayList<File>();
         try {
-            File root = Environment.getExternalStorageDirectory();
-            if (root == null) return "";
-            return new File(new File(root, DIR), NAME).getPath();
+            File appDir = context.getExternalFilesDir(null);
+            if (appDir != null) out.add(new File(appDir, NAME));
         } catch (Throwable t) {
-            return "";
+            // A platform without the call simply does not offer this place.
+        }
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext != null) {
+                out.add(new File(new File(ext, "DCIM"), NAME));
+                out.add(new File(ext, NAME));
+                out.add(new File(new File(ext, "bettertimelapse"), NAME));
+            }
+        } catch (Throwable t) {
+            // Fall through to the fixed spellings below.
+        }
+        out.add(new File("/mnt/sdcard/DCIM", NAME));
+        out.add(new File("/mnt/sdcard", NAME));
+        try {
+            File internal = context.getFilesDir();
+            if (internal != null) out.add(new File(internal, NAME));
+        } catch (Throwable t) {
+            // Nothing left; the attempts line will say so.
+        }
+        return dedupe(out);
+    }
+
+    /** Two spellings of one place would otherwise be reported twice. */
+    private static List<File> dedupe(List<File> in) {
+        List<File> out = new ArrayList<File>();
+        for (int i = 0; i < in.size(); i++) {
+            String path = in.get(i).getPath();
+            boolean seen = false;
+            for (int j = 0; j < out.size(); j++) {
+                if (out.get(j).getPath().equals(path)) seen = true;
+            }
+            if (!seen) out.add(in.get(i));
+        }
+        return out;
+    }
+
+    private static boolean isInternal(Context context, File file) {
+        try {
+            File internal = context.getFilesDir();
+            return internal != null && file.getPath().startsWith(internal.getPath());
+        } catch (Throwable t) {
+            return false;
         }
     }
 
-    /**
-     * Write the report. Returns the path written, or an empty string with {@link #problem()} saying why.
-     *
-     * <p>Nothing is thrown at the caller: a diagnostic that crashes the app it is diagnosing is worse than
-     * no diagnostic, and the failure is reported on the panel instead.
-     */
-    public static String write(String body) {
-        problem = "";
+    // ---------------------------------------------------------------- the write itself
+
+    private static String lastProblem = "";
+
+    private static boolean writeTo(File file, String body) {
+        lastProblem = "";
         try {
-            File root = Environment.getExternalStorageDirectory();
-            if (root == null) {
-                problem = "no external storage";
-                return "";
-            }
-            File dir = new File(root, DIR);
-            if (!dir.isDirectory() && !dir.mkdirs()) {
-                problem = "cannot create " + dir.getPath();
-                return "";
-            }
-            File file = new File(dir, NAME);
             OutputStream out = new FileOutputStream(file);
             try {
                 out.write(body.getBytes("UTF-8"));
             } finally {
                 out.close();
             }
-            return file.getPath();
+            return true;
         } catch (Throwable t) {
-            problem = t.getClass().getSimpleName()
-                    + (t.getMessage() == null ? "" : ": " + t.getMessage());
-            return "";
+            String message = t.getMessage();
+            lastProblem = message == null || message.length() == 0
+                    ? t.getClass().getSimpleName() : message;
+            return false;
         }
     }
 
-    private static String problem = "";
+    /** The interesting half of a Java IO message: "open failed: EACCES (Permission denied)" is noise. */
+    private static String shortReason(String message) {
+        if (message == null || message.length() == 0) return "failed";
+        int bracket = message.indexOf('(');
+        if (bracket > 0 && message.endsWith(")")) {
+            return message.substring(bracket + 1, message.length() - 1);
+        }
+        return message;
+    }
 
-    /** Why the last write failed, or an empty string. */
-    public static String problem() {
-        return problem;
+    /** {@code reason (n) reason (n)}, commonest first, which is all that fits on one panel line. */
+    private static String summarise(List<String> reasons) {
+        List<String> distinct = new ArrayList<String>();
+        List<Integer> counts = new ArrayList<Integer>();
+        for (int i = 0; i < reasons.size(); i++) {
+            String reason = reasons.get(i);
+            int at = distinct.indexOf(reason);
+            if (at < 0) {
+                distinct.add(reason);
+                counts.add(Integer.valueOf(1));
+            } else {
+                counts.set(at, Integer.valueOf(counts.get(at).intValue() + 1));
+            }
+        }
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < distinct.size(); i++) {
+            if (b.length() > 0) b.append("  ");
+            b.append(distinct.get(i)).append(" (").append(counts.get(i)).append(')');
+        }
+        return b.length() == 0 ? "nothing to try" : b.toString();
     }
 }

@@ -49,6 +49,8 @@ public class Context {
     public Intent registerReceiver(BroadcastReceiver r, IntentFilter f) { return null; }
     public AssetManager getAssets() { return null; }
     public File getFilesDir() { return null; }
+    // API 8: the platform's own directory for this app on the card, which is the first place a dump tries.
+    public File getExternalFilesDir(String type) { return null; }
 }
 EOF
     cat > "$STUBS/android/content/BroadcastReceiver.java" <<'EOF'

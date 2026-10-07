@@ -387,10 +387,18 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         b.append("shortest.interval=").append(body.shortestIntervalMs(plan)).append('\n');
         b.append("body.busy.lower.bound=").append(body.lowerBoundMs()).append('\n');
 
-        String written = DevDump.write(b.toString());
+        String written = DevDump.write(this, b.toString());
         if (written.length() == 0) {
+            // Nothing on the card would take it. There is no adb on this camera and no way to pull an app's
+            // private files, so the reason has to fit on one line — and the answer to the question the dump
+            // was written for goes on the panel by itself, because a photograph of it is then the only way
+            // this data leaves the camera.
             panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5199\u4e0d\u8fdb\u53bb\uff1a"      // 设备清单写不进去：
-                    + DevDump.problem());
+                    + DevDump.attempts());
+            panel.setRoots("\u53c2\u6570\u952e " + camera.parameterKeys());                  // 参数键
+        } else if (!DevDump.onCard()) {
+            panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5728\u673a\u8eab\u5185\u90e8\uff08\u53d6\u4e0d\u51fa\uff09\uff1a"  // 设备清单在机身内部（取不出）：
+                    + camera.parameterKeys());
         } else {
             panel.setCameraNote(camera.capabilities().summary(camera.previewing())
                     + "  \u6e05\u5355 " + written);                                          // 清单 <路径>
