@@ -60,7 +60,16 @@ public final class PanelView extends View {
 
     // ---- what the screen is showing ----
     private int row = Plan.ROW_INTERVAL;
-    private int panelMode = PANEL_FULL;
+    /**
+     * The screen starts as one line.
+     *
+     * <p>Three things are true at once on a night shoot: the panel is the only light this app controls, the
+     * screen is the only thing that wears, and the full panel is needed when setting a run up rather than while
+     * it runs. Starting in the one-line mode answers all three without the display switch that this body minds
+     * (A50), and the full panel is one press of TRASH away. What the line shows is unchanged: the state is
+     * never one of the things dropped.
+     */
+    private int panelMode = PANEL_LABEL;
 
     /**
      * Dry run: the engine runs for real, the shutter does not. It exists so the whole panel can be
@@ -503,6 +512,16 @@ public final class PanelView extends View {
     }
 
     private void drawStatusOnly(Canvas canvas, float w, float h) {
+        // What the line says: the state, then the countdown with a bar, then either the plan (when there is no
+        // run to report on) or the count (when there is). The plan summary answers "what did I ask for", which
+        // is not the question anyone has while a shoot is running.
+        boolean over = engine.state() == Engine.IDLE || engine.state() == Engine.DONE
+                || engine.state() == Engine.FAULT;
+        String rest = over
+                ? Hud.statusLine(engine.plan(), batteryPercent, charging, cardFreeBytes, bytesPerFrame)
+                : Hud.labelLine(engine.landed(), engine.plan().frames(), engine.skipped(),
+                        engine.unverified());
+
         paint.setTextSize(bigSize);
         paint.setFakeBoldText(true);
         int state = engine.state();
@@ -521,16 +540,17 @@ public final class PanelView extends View {
             String count = Hud.countdown(next);
             canvas.drawText(count, x, y, paint);
             x += paint.measureText(count) + padding * 2f;
+            // The bar takes whatever room is left once the text it must not push off the screen has been
+            // measured. A glance at a camera at night asks "is it close", and a bar answers that without being
+            // read -- which is the whole reason this mode exists.
+            float cell = paint.measureText("0");
+            float room = w - padding - x - paint.measureText(rest) - padding * 2f;
+            String bar = Hud.countdownBar(next, (int) (room / cell), engine.plan().intervalMs());
+            if (bar.length() > 0) {
+                canvas.drawText(bar, x, y, paint);
+                x += paint.measureText(bar) + padding * 2f;
+            }
         }
-        // What follows depends on whether there is a run to report on: the plan while idle, the count
-        // while it is going. The plan summary is the answer to "what did I ask for", which is not the
-        // question anyone has while a shoot is running.
-        boolean over = engine.state() == Engine.IDLE || engine.state() == Engine.DONE
-                || engine.state() == Engine.FAULT;
-        String rest = over
-                ? Hud.statusLine(engine.plan(), batteryPercent, charging, cardFreeBytes, bytesPerFrame)
-                : Hud.labelLine(engine.landed(), engine.plan().frames(), engine.skipped(),
-                        engine.unverified());
         if (x + paint.measureText(rest) <= w - padding) {
             canvas.drawText(rest, x, y, paint);
         }

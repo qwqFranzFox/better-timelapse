@@ -165,4 +165,20 @@ class HudTest {
         // Adding them back is how this row grew long enough to be drawn through the font note next to it.
         assertFalse(legend.contains("长按"), legend);
     }
+
+    @Test
+    void theCountdownBarFillsUpAsTheFrameApproaches() {
+        // The one-line mode's whole point is to be read at a glance, so the bar is drawn from characters here
+        // where the arithmetic can be checked without a camera -- the panel only paints the string.
+        assertEquals("[..........]", Hud.countdownBar(10000, 12, 10000), "nothing elapsed yet");
+        assertEquals("[#####.....]", Hud.countdownBar(5000, 12, 10000), "half way");
+        assertEquals("[##########]", Hud.countdownBar(0, 12, 10000), "the moment is here");
+        // A frame that is already late stays full rather than running off the end.
+        assertEquals("[##########]", Hud.countdownBar(-500, 12, 10000), "late is still full");
+        assertEquals("", Hud.countdownBar(Schedule.NONE, 12, 10000), "no frame, no bar");
+        assertEquals("", Hud.countdownBar(1000, 12, 0), "no interval to be a fraction of");
+        // Too narrow: a four-cell bar is the floor, because a bar that cannot show one cell is not a bar.
+        assertEquals("[#.]", Hud.countdownBar(5000, 4, 10000));
+        assertEquals("[#.]", Hud.countdownBar(5000, 1, 10000), "a cell count below the floor is raised to it");
+    }
 }

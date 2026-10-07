@@ -64,7 +64,13 @@ public final class Plan {
         wanted[ROW_SILENT] = 0;      // off: on some bodies this is the option that crashes a run
         wanted[ROW_DRIVE] = DRIVE_SINGLE;
         wanted[ROW_AEL] = 0;
-        wanted[ROW_PANEL_OFF] = 1;   // on: a lit panel is the last thing a long night shoot needs
+        // Off by default, and that is a measured decision rather than a preference: switching this body's
+        // display output away for more than a few seconds makes it ask to repair its card data at the next
+        // power-on, and the user's own comparisons pinned it on this action (A50, A51). The old app never
+        // darkened its screen either -- its display-off call is commented out in the versions people actually
+        // ran -- so off is also what "the known-good configuration" means here. What replaces it as the
+        // default is the one-line panel: less light, less burn-in, and no display switch at all.
+        wanted[ROW_PANEL_OFF] = 0;
         // On by default, because reading the card is what turns "the app pressed the shutter" into "the card
         // has the file", and that distinction is the reason this project exists (docs/DECISIONS.md A9). It is a
         // row rather than a constant because it is also the app's only claim on the camera's storage between

@@ -82,7 +82,10 @@ class LogLinesTest {
         assertTrue(line.contains("settle=1200ms"), line);
         assertTrue(line.contains("silent=on"), line);
         assertTrue(line.contains("drive=single"), line);
-        assertTrue(line.contains("paneloff=on"), line);
+        // Off by default now, and the log has to say what the run actually did rather than what the app
+        // prefers: darkening this body's panel is what made it ask to repair its card data (A50, A51).
+        assertTrue(line.contains("paneloff=off"), line);
+        assertTrue(line.contains("cardcheck=on"), line);
     }
 
     @Test

@@ -286,6 +286,37 @@ public final class Hud {
         return String.format(Locale.US, "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
     }
 
+    /**
+     * A countdown as a bar of characters, for the one-line panel.
+     *
+     * <p>The single-line mode shows a number and nothing else, and a number is the wrong shape for "how long
+     * until the next frame": the question a person glancing at a camera at night is asking is "is it close",
+     * and a bar answers that without being read. Drawn from characters rather than rectangles so that the
+     * arithmetic can be checked off the camera, like every other decision in this file — the panel only paints
+     * the string.
+     *
+     * <p>{@code '#'} is elapsed and {@code '.'} is remaining, so the bar fills up rather than draining: a
+     * screen that goes dark as the frame approaches reads as losing time, not as approaching a frame.
+     *
+     * @param remainingMs how long until the next frame, or {@link Schedule#NONE} when none is due.
+     * @param cells how many characters the bar may use, brackets included.
+     * @param intervalMs the whole wait the bar is a fraction of; {@link Frames#UNKNOWN} or less draws nothing.
+     */
+    public static String countdownBar(long remainingMs, int cells, long intervalMs) {
+        if (remainingMs == Schedule.NONE || intervalMs <= 0) return "";
+        if (cells < 4) cells = 4;
+        int inner = cells - 2;
+        long left = Math.max(0, Math.min(remainingMs, intervalMs));
+        int elapsed = (int) Math.round((double) (intervalMs - left) * inner / intervalMs);
+        if (elapsed < 0) elapsed = 0;
+        if (elapsed > inner) elapsed = inner;
+        StringBuilder b = new StringBuilder(cells);
+        b.append('[');
+        for (int i = 0; i < inner; i++) b.append(i < elapsed ? '#' : '.');
+        b.append(']');
+        return b.toString();
+    }
+
     /** The progress line: frames taken against the plan, and how long the run has been going. */
     public static String progressLine(int landed, int planned, int accounted, int unverified,
             int skipped, long elapsedMs) {
