@@ -164,6 +164,9 @@ class HudTest {
         // Hold actions are deliberately absent (PLAN §4.1 item 6): they are for the people who go looking.
         // Adding them back is how this row grew long enough to be drawn through the font note next to it.
         assertFalse(legend.contains("长按"), legend);
+        // The panel sizes moved to C1, and the legend has to name the key that does the job rather than the one
+        // that used to. A legend is the app's own claim about its keys, so it is checked like any other claim.
+        assertTrue(legend.contains("C1"), legend);
     }
 
     @Test

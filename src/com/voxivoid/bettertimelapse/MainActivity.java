@@ -1454,6 +1454,31 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private static final long TICK_MS = 250;
 
+    /**
+     * Which size the panel is, and why it changed. The rules live in the machine; this only applies them.
+     */
+    private final PanelMachine panelMachine = new PanelMachine();
+
+    /** Applies whatever mode the machine now wants, and keeps the idle timer in step with it. */
+    private void applyPanelMode() {
+        panel.setPanelMode(panelMachine.mode());
+        handler.removeCallbacks(onPanelIdle);
+        if (panelMachine.mode() == PanelModes.LABEL) {
+            // Only the one-line mode can time out, so the timer is only armed for it: a poll that runs always
+            // would be a timer for a transition that cannot happen.
+            handler.postDelayed(onPanelIdle, PanelMachine.IDLE_TO_MINIMAL_MS);
+        }
+    }
+
+    private final Runnable onPanelIdle = new Runnable() {
+        @Override
+        public void run() {
+            int before = panelMachine.mode();
+            panelMachine.tick(now());
+            if (panelMachine.mode() != before) applyPanelMode();
+        }
+    };
+
     private final Runnable onTickRedraw = new Runnable() {
         @Override
         public void run() {
@@ -1658,6 +1683,15 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // each branch, so that no key can be missed — including the ones this app ignores on purpose.
         if (screen.isOff()) wakePanel();
 
+        // And any key also means "somebody is looking", which is what brings the minimal state back to the one
+        // line. C1 is excluded because it has its own meaning and is handled below; every other key counts,
+        // including the ones this app does nothing with.
+        if (scan != Keys.K_C1) {
+            int before = panelMachine.mode();
+            panelMachine.anyKey(now());
+            if (panelMachine.mode() != before) applyPanelMode();
+        }
+
         switch (scan) {
             case Keys.K_WHEEL_CW:
             case Keys.K_DIAL_CW:
@@ -1678,6 +1712,15 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 // without it.
                 if (down.down(repeat) == Keys.Hold.ARM) handler.postDelayed(onDownHold, Keys.HOLD_MS);
                 if (repeat == 0) panel.move(1);
+                return true;
+            case Keys.K_C1:
+                // C1 switches between the two sizes a person chooses between. The minimal state is deliberately
+                // not on this key: it is what the screen becomes when nobody is looking at it, and a key that
+                // could put the screen there is a key that can hide the app's own state by accident.
+                if (repeat == 0) {
+                    panelMachine.cycleKey(now());
+                    applyPanelMode();
+                }
                 return true;
             case Keys.K_LEFT:
                 panel.adjust(-1);
@@ -1762,6 +1805,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         // seconds after the run it belongs to makes the first frame's `late=` a 2.5-second lie
                         // and hands the countdown that much less time. See docs/DECISIONS.md A39.
                         runStartMs = now();
+                        panelMachine.recordingStarted(now());
+                        applyPanelMode();
                         handler.removeCallbacks(onTickRedraw);
                         handler.postDelayed(onTickRedraw, TICK_MS);
                         engine.step(Engine.EV_ENTER, runStartMs);
@@ -1819,6 +1864,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         // The run is over, so the panel comes back now rather than on the next frame's wake-up:
                         // a stopped run whose screen is dark is a camera the user cannot read the count off.
                         wakePanel();
+                        // And the panel goes back to the rows: the next thing anyone does after a run is set up
+                        // another one, and that needs the screen that shows what the plan is.
+                        panelMachine.recordingStopped();
+                        applyPanelMode();
                         handler.removeCallbacks(onTick);
                         handler.removeCallbacks(onRelease);
                         handler.removeCallbacks(onRetryFire);
@@ -1881,8 +1930,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private final Runnable onUpHold = new Runnable() {
         @Override
         public void run() {
-            if (up.fire() != Keys.Hold.HOLD) return;
-            panel.cyclePanel();
+            // The panel sizes are on C1 now. Up-held used to cycle them, and leaving both bound would mean two
+            // keys doing one job -- the kind of thing that makes a camera feel unreliable rather than generous.
+            up.fire();
         }
     };
 

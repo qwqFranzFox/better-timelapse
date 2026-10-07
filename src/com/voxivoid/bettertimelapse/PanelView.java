@@ -33,21 +33,25 @@ import android.view.View;
 public final class PanelView extends View {
 
     /**
-     * How much of the screen the panel occupies: three steps of the same thing, which is light in front
-     * of a long exposure.
+     * How much of the screen the panel occupies: three sizes of the same thing, which is light in front of a
+     * long exposure — and which of them is showing is decided by {@link PanelMachine}, not here.
      *
      * <ul>
-     *   <li>{@link #PANEL_FULL} — the state, every row, the progress block, the legend and the
-     *       diagnostics. The screen for editing and for reading what happened.</li>
-     *   <li>{@link #PANEL_LABEL} — one line, centred and small: the state, the countdown, how many frames
-     *       are taken. For a shoot where the screen ends up in the frame but you still want to glance at
-     *       it.</li>
-     *   <li>{@link #PANEL_HIDDEN} — the state word alone, top left, dim. For a night frame where the
-     *       screen must not be a light source. The state is never one of the things dropped: a screen that
-     *       will not say whether the run is still going is the failure this app exists to avoid.</li>
+     *   <li>{@link #PANEL_FULL} — the state, every row, the progress block, the legend and the diagnostics. The
+     *       screen for editing and for reading what happened, and what the app opens with.</li>
+     *   <li>{@link #PANEL_LABEL} — one line: the state, the countdown, the run's own progress bar and either the
+     *       plan or the count. What the app shows while a run is going, and what C1 switches back to.</li>
+     *   <li>{@link #PANEL_HIDDEN} — the state word alone, dim. Reached by leaving the one-line mode untouched
+     *       for a minute, and left by pressing anything. Deliberately not on a key: the state is never one of the
+     *       things dropped, but a key that could hide the app's own state by accident would be worse than the
+     *       light it saves.</li>
      * </ul>
+     *
+     * <p>Both one-line modes drift slowly up and down ({@code Hud.burnInShift}), because a screen that is on for
+     * hours in the same rows is the other way a panel wears out.
      */
-    public static final int PANEL_FULL = 0, PANEL_LABEL = 1, PANEL_HIDDEN = 2;
+    public static final int PANEL_FULL = PanelModes.FULL, PANEL_LABEL = PanelModes.LABEL,
+            PANEL_HIDDEN = PanelModes.MINIMAL;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -263,9 +267,15 @@ public final class PanelView extends View {
         paint.setColor(colDim);
     }
 
-    /** TRASH: cycle how much of the panel is on screen. */
-    public void cyclePanel() {
-        panelMode = (panelMode + 1) % 3;
+    /**
+     * Set how much of the panel is on screen. The decision is {@link PanelMachine}'s; this only draws it.
+     *
+     * <p>There is no cycling here any more. The machine knows that two sizes are the user's to choose and the
+     * third is only ever reached by waiting, which is not something a modulo can express.
+     */
+    public void setPanelMode(int mode) {
+        if (panelMode == mode) return;
+        panelMode = mode;
         invalidate();
     }
 
@@ -507,8 +517,13 @@ public final class PanelView extends View {
     private void drawStateWordOnly(Canvas canvas, float w, float top, float height) {
         paint.setTextSize(bigSize);
         paint.setColor(engine.state() == Engine.FAULT ? colWarn : colDim);
+        // The same anti-burn-in idea as the one-line mode, applied to the one word this mode draws: a single
+        // word in a single place for hours burns in exactly as happily as anything else, and this mode exists
+        // precisely because a run may last for hours. Slower than the line's drift -- there is less on screen to
+        // move, and a word sliding about is more noticeable than a line breathing.
+        float shift = Hud.burnInShift(now(), bigSize * 0.35f, Hud.MINIMAL_DRIFT_PERIOD_MS);
         canvas.drawText(Hud.stateName(engine.state()), padding,
-                baselineIn(top, height, paint), paint);
+                baselineIn(top, height, paint) + shift, paint);
     }
 
     private void drawStatusOnly(Canvas canvas, float w, float h) {

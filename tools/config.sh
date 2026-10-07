@@ -42,4 +42,6 @@ UNITS=(
     DisplayApi
     Screen
     Teardown
+    PanelModes
+    PanelMachine
 )

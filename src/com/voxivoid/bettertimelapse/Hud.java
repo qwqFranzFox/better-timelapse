@@ -343,6 +343,14 @@ public final class Hud {
     public static final long BURN_IN_PERIOD_MS = 10_000;
 
     /**
+     * How long the minimal state's drift takes: slower than the one-line mode's, for the same reason.
+     *
+     * <p>That mode draws one word and nothing else. There is less on screen to move, and a word that slides
+     * about is easier to notice than a line of text breathing, so it gets a longer round trip.
+     */
+    public static final long MINIMAL_DRIFT_PERIOD_MS = 45_000;
+
+    /**
      * Where to draw a fixed piece of screen so that it does not sit in the same place for hours.
      *
      * <p>A progress bar is the worst case for a panel: the same few hundred pixels lit, in the same rows, for a
@@ -358,8 +366,18 @@ public final class Hud {
      * @return an offset in {@code [-amplitudePx, +amplitudePx]}.
      */
     public static float burnInShift(long nowMs, float amplitudePx) {
+        return burnInShift(nowMs, amplitudePx, BURN_IN_PERIOD_MS);
+    }
+
+    /**
+     * The same, over a period of the caller's choosing.
+     *
+     * <p>The minimal state draws one word and nothing else, so there is less on screen to move and a moving word
+     * is easier to notice than a line of text breathing: it gets a slower round trip than the one-line mode.
+     */
+    public static float burnInShift(long nowMs, float amplitudePx, long periodMs) {
         if (amplitudePx <= 0f) return 0f;
-        long period = BURN_IN_PERIOD_MS;
+        long period = periodMs > 0 ? periodMs : BURN_IN_PERIOD_MS;
         long phase = ((nowMs % period) + period) % period;          // a negative clock still lands in range
         float half = period / 2f;
         float t = phase < half ? phase / half : (period - phase) / half;   // up, then back down
@@ -495,7 +513,8 @@ public final class Hud {
                 + "\u6eda\u8f6e \u5fae\u8c03   "                  // 滚轮 微调
                 + "\u2191\u2193 \u6362\u884c   "                  // ↑↓ 换行
                 + "\u4e2d\u5fc3 \u5f00\u59cb   "                  // 中心 开始
-                + "TRASH \u6682\u505c";                          // TRASH 暂停
+                + "TRASH \u6682\u505c   "                          // TRASH 暂停
+                + "C1 \u5c4f\u663e";                              // C1 屏显
     }
 
     /** Shown once under the legend while the demo key is what drives the screen. */

@@ -84,14 +84,19 @@ public final class Keys {
     }
 
     /**
-     * Keys the app consumes so the firmware never sees them. AEL, C1 and DISP are not bound and not
-     * wanted: TRASH hides the panel on every body, so AEL adds nothing; DISP would steal wheel-up on
-     * a wheel-top body while on another body it would hide the panel mid-shoot. Swallowing them is
-     * how the app keeps the camera's own menu out of a running time-lapse.
+     * Keys the app consumes so the firmware never sees them.
+     *
+     * <p>AEL, DISP and PLAY are still not wanted: TRASH is the panel key on every body, so AEL adds nothing;
+     * DISP would steal wheel-up on a wheel-top body while on another it would hide the panel mid-shoot.
+     * Swallowing them is how the app keeps the camera's own menu out of a running time-lapse.
+     *
+     * <p>C1 has come off this list: it switches the panel size now, so it has to reach the app. The list must
+     * never contain a key the app acts on -- a bound key that is swallowed is a key that does nothing, which is
+     * exactly the failure {@code KeysTest} exists to catch.
      */
     public static boolean swallowed(int scan) {
         switch (scan) {
-            case K_AEL: case K_C1: case K_DISP: case K_PLAY:
+            case K_AEL: case K_DISP: case K_PLAY:
                 return true;
             default:
                 return false;

@@ -32,12 +32,14 @@ class KeysTest {
         // Each of these does something on the camera that would interrupt a shoot: AEL locks exposure,
         // DISP changes the display, PLAY leaves the app's screen entirely.
         assertTrue(Keys.swallowed(Keys.K_AEL));
-        assertTrue(Keys.swallowed(Keys.K_C1));
         assertTrue(Keys.swallowed(Keys.K_DISP));
         assertTrue(Keys.swallowed(Keys.K_PLAY));
 
         assertFalse(Keys.swallowed(Keys.K_ENTER), "the centre button is the app's own");
         assertFalse(Keys.swallowed(Keys.K_WHEEL_CW));
+        // C1 came off this list when it became the panel-size key. A bound key that is swallowed is a key that
+        // does nothing, which is the failure this test is for -- so the two must never both be true.
+        assertFalse(Keys.swallowed(Keys.K_C1), "C1 switches the panel size now, so it has to reach the app");
     }
 
     @Test
