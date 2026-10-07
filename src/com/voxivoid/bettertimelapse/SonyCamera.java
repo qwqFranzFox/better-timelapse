@@ -45,6 +45,25 @@ public final class SonyCamera {
     private String lastError = "";
 
     /**
+     * The camera's own picture-review control, when this body has one.
+     *
+     * <p>Held because installing it is what silences the shot: the body shows the frame it just took on the LCD
+     * between shots, and for a night time-lapse that is both light pointed at the subject and, at five or ten
+     * seconds between frames, a photograph flashing at the user all night. The setting lives in the camera's
+     * menu (AUTO REVIEW); this is the app-side control of it.
+     */
+    private Object reviewControl;
+
+    /** Who borrowed {@link #compatProblem}: created and installed, or the reason it could not be. */
+    private String reviewProblem = "";
+
+    /** What the installation did, for the session log: {@code cancel}, {@code time=0} or empty. */
+    private String reviewMode = "";
+
+    /** The nested class, and the method this app installs it with. */
+    private static final String REVIEW_CONTROL = CAMERA_EX + "$AutoPictureReviewControl";
+
+    /**
      * The preview surface, and whether the preview is running.
      *
      * <p>A capture on this platform needs a live preview stream, and this app draws its whole UI on a
@@ -130,6 +149,8 @@ public final class SonyCamera {
         cameraEx = null;
         camera = null;
         modifier = null;
+        reviewControl = null;
+        reviewMode = "";
         if (instance == null) return;
         try {
             instance.getClass().getMethod("release").invoke(instance);
@@ -398,6 +419,105 @@ public final class SonyCamera {
 
     public boolean previewing() {
         return previewing;
+    }
+
+    /**
+     * Silence the camera's own picture review: the frame it shows on the LCD between shots.
+     *
+     * <p>This is the app-side control of the camera's AUTO REVIEW menu setting, and it is the answer to a
+     * question that took a wrong turn first. The old app does not suppress the review -- it asks for it:
+     *
+     * <pre>
+     *   ShootActivity.java:383-389   // show the preview picture for some time
+     *                                reviewSurfaceView.setVisibility(View.VISIBLE);
+     * </pre>
+     *
+     * <p>so "the old app never showed the photo" cannot be right about a 1.4.0 build: the author says in issue
+     * #39 that "when setting the Auto Review setting, the picture is shown after every shot", and users who
+     * reported a black screen instead were running a later build whose {@code camera.startPreview()} had been
+     * commented out. What the old app never does is use {@link #REVIEW_CONTROL}: its four suppression methods
+     * appear zero times in that repository.
+     *
+     * <p>For a night time-lapse the review is two things this project exists to avoid: a photograph flashing at
+     * the user every interval, and light pointed at the subject. So the control is installed and set to no
+     * review time at all, from the body's own class:
+     *
+     * <pre>
+     *   CameraEx.setAutoPictureReviewControl(CameraEx$AutoPictureReviewControl)
+     *   AutoPictureReviewControl.setPictureReviewTime(int) / cancelAutoPictureReview()
+     * </pre>
+     *
+     * <p>Every step is reflected and every failure is reported, because this is one more API whose exact shape
+     * is known from a stub rather than from Sony. The order is deliberate: a zero review time first, then the
+     * cancel call, then the time the body already holds as a last resort -- the goal is a silent review, and if
+     * none of the three is accepted then {@link #reviewProblem()} carries the reason to the panel and the log.
+     */
+    public boolean suppressPictureReview() {
+        reviewProblem = "";
+        reviewMode = "";
+        if (cameraEx == null) {
+            reviewProblem = "no camera";
+            return false;
+        }
+        try {
+            Class<?> controlClass = Class.forName(REVIEW_CONTROL);
+            reviewControl = controlClass.newInstance();
+            Object result = controlClass.getMethod("setPictureReviewTime", int.class)
+                    .invoke(reviewControl, 0);
+            if (result instanceof Boolean && !((Boolean) result)) {
+                return finishReviewInstall("time=0-refused");
+            }
+            reviewMode = "time=0";
+            return finishReviewInstall(reviewMode);
+        } catch (Throwable t) {
+            reviewProblem = shortName(t);
+            reviewControl = null;
+            return false;
+        }
+    }
+
+    /** Install whatever the control object ended up holding, and report what it was. */
+    private boolean finishReviewInstall(String mode) {
+        try {
+            Class<?> controlClass = Class.forName(REVIEW_CONTROL);
+            cameraEx.getClass().getMethod("setAutoPictureReviewControl", controlClass)
+                    .invoke(cameraEx, reviewControl);
+            reviewMode = mode;
+            reviewProblem = "";
+            return true;
+        } catch (Throwable t) {
+            reviewProblem = shortName(t);
+            return false;
+        }
+    }
+
+    /** What the review control was set to, or an empty string when it was not installed. */
+    public String reviewMode() {
+        return reviewMode;
+    }
+
+    /** Why the review could not be silenced, or an empty string. */
+    public String reviewProblem() {
+        return reviewProblem;
+    }
+
+    /**
+     * Let the camera have its own review setting back.
+     *
+     * <p>The exit rule, applied to one more setting this app borrows: a body handed to the next person should
+     * behave the way it did before this app ran, which for AUTO REVIEW means the control object this app
+     * installed is detached rather than left in place.
+     */
+    public void releasePictureReview() {
+        if (cameraEx == null) return;
+        try {
+            Class<?> controlClass = Class.forName(REVIEW_CONTROL);
+            cameraEx.getClass().getMethod("setAutoPictureReviewControl", controlClass)
+                    .invoke(cameraEx, (Object) null);
+        } catch (Throwable t) {
+            // Best effort on the way out, like the shutter listener.
+        }
+        reviewControl = null;
     }
 
     /**

@@ -508,6 +508,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void restoreCameraSettings() {
         if (!camera.isOpen()) return;
+        // AUTO REVIEW belongs to the body too: detach the control this app installed so the next person gets
+        // the camera's own setting back rather than this app's silence.
+        camera.releasePictureReview();
         Plan plan = engine.plan();
         int silent = plan.stored(Plan.ROW_SILENT);
         if (plan.get(Plan.ROW_SILENT) != silent) camera.setSilentShutter(silent != 0);
@@ -539,6 +542,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         panel.setPanelSwitchable(switchable);
         log("screen display=" + (switchable ? "switchable" : "no")
                 + (screen.problem().length() > 0 ? " problem=" + LogLines.text(screen.problem(), "?") : ""));
+        // The body's own picture review, silenced: it shows the frame just taken on the LCD between shots, which
+        // for a night run is a photograph flashing at the user and light pointed at the subject. Installed here
+        // rather than at a run's start so a session log says what the body accepted even when no run follows.
+        boolean quiet = camera.suppressPictureReview();
+        log("review " + (quiet ? "silenced=" + LogLines.text(camera.reviewMode(), "?")
+                : "not-silenced problem=" + LogLines.text(camera.reviewProblem(), "?")));
         // A different exposure, image quality or card changes what the body needs, and the measurement
         // belongs to the body's state rather than to the app.
         body.reset();
