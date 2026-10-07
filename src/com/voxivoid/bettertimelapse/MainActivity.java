@@ -315,6 +315,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // only part of the state that is not about this app.
         wakePanel();
         handler.removeCallbacks(onPanelOff);
+        handler.removeCallbacks(onPanelOffAsk);
         handler.removeCallbacks(onPanelWake);
         // Clear every hold: a release that lands while the app is not looking must not leave a key
         // stuck down, which is the failure that makes a camera app look broken.
@@ -962,7 +963,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         handler.removeCallbacks(onRelease);
         // The longer of the two signals: what the body says its exposure is, and how long its own callback
         // has taken when it sends one. Releasing before the exposure ends risks cutting the frame off.
-        panelOffArmed = false;                  // a new frame: its dark window is armed when it finishes
+        panelOffAsks = 0;                       // a new frame: its dark window is armed when it finishes
         pressWindowUsedMs = Frames.pressWindowMs(engine.plan(), Math.max(exposureMs, callbackHintMs));
         handler.postDelayed(onRelease, pressWindowUsedMs);
     }
@@ -1069,15 +1070,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * flight; that is the invariant, and it is what the flag keeps.
      */
     private void frameSettled() {
-        if (!panelOffArmed) {
-            panelOffArmed = true;
-            armPanelOff();
-        }
+        armPanelOff();
         armPanelWake();
     }
-
-    /** Whether the panel's dark window has been armed for the frame that just finished. */
-    private boolean panelOffArmed;
 
     // ================================================================ the panel between frames
 
@@ -1091,14 +1086,45 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void armPanelOff() {
         handler.removeCallbacks(onPanelOff);
+        handler.removeCallbacks(onPanelOffAsk);
         String why = panelRefusal();
         if (why.length() > 0) {
-            log(LogLines.panelWhy("arm", why, runStartMs()));
+            // A refusal here is not a decision to leave the panel lit, it is a "not yet". The body reports a
+            // frame's ending through a callback that arrives while the engine still counts the frame as in
+            // flight -- measured on the camera, twice in one run:
+            //
+            //     panel action=arm why=in-flight at=+0.578s
+            //     panel action=arm why=in-flight at=+5.204s
+            //
+            // and a feature that gives up on the first "not yet" did nothing at all while its row claimed
+            // otherwise. So it asks again, briefly: the frame's own release is at due+2500ms and this can only
+            // run in the quiet stretch, so a few attempts a few hundred milliseconds apart are spent well
+            // inside the interval.
+            if (why.equals("in-flight") && panelOffAsks < PANEL_OFF_ASKS_MAX) {
+                panelOffAsks++;
+                handler.postDelayed(onPanelOffAsk, PANEL_OFF_ASK_MS);
+            } else if (!why.equals("in-flight")) {
+                log(LogLines.panelWhy("arm", why, runStartMs()));
+            }
             return;
         }
-        log(LogLines.panelWhy("arm", "armed", runStartMs()));
+        panelOffAsks = 0;
         handler.postDelayed(onPanelOff, Frames.panelOffDelayMs(engine.plan()));
     }
+
+    /** How many times a frame-in-flight refusal is asked again, and how far apart. */
+    private static final int PANEL_OFF_ASKS_MAX = 6;
+    private static final long PANEL_OFF_ASK_MS = 250;
+
+    /** How many of those have been used for the frame currently finishing. */
+    private int panelOffAsks;
+
+    private final Runnable onPanelOffAsk = new Runnable() {
+        @Override
+        public void run() {
+            armPanelOff();
+        }
+    };
 
     /**
      * Bring the panel back before the next frame's moment.
@@ -1190,6 +1216,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void wakePanel() {
         handler.removeCallbacks(onPanelOff);
+        handler.removeCallbacks(onPanelOffAsk);
         if (screen.isOff()) {
             if (screen.on()) log(LogLines.panel("on", screen.working(), screen.activeDevice(), screen.problem()));
         }
