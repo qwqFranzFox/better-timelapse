@@ -34,6 +34,22 @@ public final class DevDump {
     /** The name, in every location it is tried under. */
     public static final String NAME = "bettertimelapse-device.txt";
 
+    /**
+     * The same file under a name an 8.3 filesystem can hold.
+     *
+     * <p>Every name on this camera's card is eight-dot-three: {@code TIMELPS/LOG.TXT}, the log the old
+     * TimeLapse app writes at launch; {@code APPSTORE.log} and {@code TWEAKLOG.txt} and {@code PMCADEMO} at
+     * the root; {@code DSC00507.ARW} and {@code 10561007} from the camera itself. This app's attempts all
+     * used a 28-character name and a 15-character directory, and every one of them came back ENOENT —
+     * "no such file or directory" — including inside directories that demonstrably exist, which is what a
+     * filesystem that cannot represent a long name says about it. {@code canWrite()} agrees the directory is
+     * writable, because it is: it is the *name* that has nowhere to go.
+     */
+    public static final String SHORT_NAME = "BTLAPSE.TXT";
+
+    /** The 8.3 spelling of the directory, for the same reason. */
+    public static final String SHORT_DIR = "BTLPSE";
+
     private DevDump() {}
 
     /** The path that worked, or an empty string. */
@@ -235,6 +251,19 @@ public final class DevDump {
      */
     private static List<File> places(Context context) {
         List<File> out = new ArrayList<File>();
+        // The 8.3 names first: they are the only kind this card has ever been seen to hold.
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext != null) {
+                out.add(new File(new File(ext, SHORT_DIR), "DEV.TXT"));
+                out.add(new File(ext, SHORT_NAME));
+                out.add(new File(new File(ext, "TIMELPS"), SHORT_NAME));
+                out.add(new File(new File(ext, "DCIM"), SHORT_NAME));
+            }
+        } catch (Throwable t) {
+            // Fall through to the long names, which is where this started.
+        }
+        out.add(new File("/mnt/sdcard", SHORT_NAME));
         try {
             File appDir = context.getExternalFilesDir(null);
             if (appDir != null) out.add(new File(appDir, NAME));
@@ -379,12 +408,17 @@ public final class DevDump {
         } catch (Throwable t) {
             // No card root to strip; the full path is the label.
         }
+        String where;
         if (root.length() > 0 && parent.startsWith(root)) {
             String rest = parent.substring(root.length());
-            return rest.length() == 0 ? "/" : rest.replace('\\', '/');
+            where = rest.length() == 0 ? "/" : rest.replace('\\', '/');
+        } else {
+            int slash = parent.lastIndexOf('/');
+            where = slash >= 0 ? parent.substring(slash + 1) + "/" : parent;
         }
-        int slash = parent.lastIndexOf('/');
-        return slash >= 0 ? parent.substring(slash + 1) + "/" : parent;
+        // Which kind of name it was, because that is the variable under test: every name on this card is
+        // 8.3 and every name this app tried was not.
+        return where + (CardNames.fitsEightDotThree(file.getName()) ? "(8.3)" : "(long)");
     }
 
     /** One entry per failed place, which is what the panel has room for. */
@@ -399,4 +433,6 @@ public final class DevDump {
     }
 
     private static final int ATTEMPTS_SHOWN = 6;
+
+
 }

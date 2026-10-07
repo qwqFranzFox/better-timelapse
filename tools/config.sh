@@ -37,4 +37,5 @@ UNITS=(
     Engine
     Frames
     BodyCycle
+    CardNames
 )
