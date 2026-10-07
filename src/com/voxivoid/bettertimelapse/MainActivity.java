@@ -1194,11 +1194,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // (ShootActivity:67-68), and this app had never stopped a preview outside onPause. Doing it in the
             // other order is what broke a run -- a preview stopped for a panel that never went dark is a camera
             // that will not take another frame, and the log of that run has two shots in it and then a pause.
-            // The stream stops with the panel, and it is the largest thing this app keeps the camera doing
-            // between frames. It comes back in wakePanel(), a whole lit stretch before the next shutter needs
-            // it -- the body refuses a capture without a live stream, so the pair is not optional.
-            camera.stopPreview();
-            log(LogLines.preview("stop", "panel-dark"));
+            // The stream is NOT stopped here any more. It was, for one round, on the theory that a running
+            // stream was what kept the panel lit -- and that theory was wrong: the panel-off worked before the
+            // stop was added and after it, so stopping bought nothing that was ever measured, while paying for
+            // it with a stop/restart pair every interval (about 1440 of them in four hours at 10s). The stream
+            // now stays up for the whole run, which is what the old app did: it stopped the preview only for
+            // its own display-off, and this is the same display-off.
             log(LogLines.panel("off", screen.working(), screen.wasActiveDevice(), screen.problem()));
         }
     };
