@@ -47,10 +47,14 @@ import android.content.res.AssetManager;
 import java.io.File;
 public class Context {
     public Intent registerReceiver(BroadcastReceiver r, IntentFilter f) { return null; }
+    // What the device dump's probe asks: whether the install actually granted the storage permission.
+    public int checkCallingOrSelfPermission(String permission) { return 0; }
     public AssetManager getAssets() { return null; }
     public File getFilesDir() { return null; }
     // API 8: the platform's own directory for this app on the card, which is the first place a dump tries.
     public File getExternalFilesDir(String type) { return null; }
+    // API 8, and the probe reports it: a card mounted read-only is a different problem from a denied app.
+    public static String getExternalStorageState() { return "mounted"; }
 }
 EOF
     cat > "$STUBS/android/content/BroadcastReceiver.java" <<'EOF'
@@ -116,7 +120,11 @@ EOF
     cat > "$STUBS/android/os/Environment.java" <<'EOF'
 package android.os;
 import java.io.File;
-public class Environment { public static File getExternalStorageDirectory() { return null; } }
+public class Environment {
+    public static File getExternalStorageDirectory() { return null; }
+    // API 8, and the write probe reports it: a card mounted read-only is a different problem from a denied app.
+    public static String getExternalStorageState() { return "mounted"; }
+}
 EOF
     cat > "$STUBS/android/os/StatFs.java" <<'EOF'
 package android.os;

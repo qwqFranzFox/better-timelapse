@@ -95,6 +95,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** Whether this run has already been told that most of its frames are not reaching the card. */
     private boolean shortfallSaid;
 
+    /** How many times the device dump has been attempted this launch. */
+    private int dumpAttempts;
+
     /** Whether this app is the one holding the exposure lock. AEL cannot be read back, so it is tracked. */
     private boolean aelLockedByUs;
 
@@ -352,6 +355,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * <p>A write that fails is reported on the panel: a diagnostic file nobody can find is worse than none.
      */
     private void writeDeviceDump() {
+        dumpAttempts++;
         Plan plan = engine.plan();
         StringBuilder b = new StringBuilder();
         b.append("# better-timelapse device dump\n");
@@ -394,7 +398,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // was written for goes on the panel by itself, because a photograph of it is then the only way
             // this data leaves the camera.
             panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5199\u4e0d\u8fdb\u53bb\uff1a"      // 设备清单写不进去：
-                    + DevDump.attempts());
+                    + DevDump.attempts() + "  " + DevDump.probe(this));
             panel.setRoots("\u53c2\u6570\u952e " + camera.parameterKeys());                  // 参数键
         } else if (!DevDump.onCard()) {
             // It landed in private storage, which on this camera cannot be retrieved at all: no adb, and
@@ -402,12 +406,32 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // the file was for — why every place on the card refused it, and the keys that could answer the
             // question it was written for.
             panel.setEvidence("\u5361\u4e0a\u5199\u4e0d\u8fdb\uff08" + DevDump.attempts()      // 卡上写不进（
-                    + "\uff09  \u53c2\u6570\u952e " + camera.parameterKeys());              // ）  参数键
+                    + "\uff09  " + DevDump.probe(this));                                      // ）
+            panel.setRoots("\u53c2\u6570\u952e " + camera.parameterKeys());                  // 参数键
         } else {
             panel.setCameraNote(camera.capabilities().summary(camera.previewing())
                     + "  \u6e05\u5355 " + written);                                          // 清单 <路径>
         }
     }
+
+    /**
+     * Try the dump again, if it never reached the card.
+     *
+     * <p>The old TimeLapse app logged into a directory of its own at the card root, from a PMCA app with the
+     * same permissions this one declares — so the path is not the problem and neither is the manifest, which
+     * leaves <em>when</em>. Its log was written while a shoot was running, seconds after the app started;
+     * this one wrote two seconds after launch, before it had read the card even once. So the attempts are
+     * spread out: at open, after the first successful card walk, and when a run begins. Bounded, because a
+     * diagnostic that keeps retrying forever is its own kind of noise.
+     */
+    private void retryDeviceDump() {
+        if (DevDump.onCard() || dumpAttempts >= DUMP_ATTEMPTS_MAX) return;
+        dumpAttempts++;
+        writeDeviceDump();
+    }
+
+    /** How many times the device dump is tried when the card will not take it. */
+    private static final int DUMP_ATTEMPTS_MAX = 4;
 
     /**
      * Put the body back the way this app found it.
@@ -849,6 +873,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             accountForFrames();
             if (lastGained > 0) engine.setLastFile(cardNewest);
             pushCardLines();
+            retryDeviceDump();
             panel.invalidate();
         }
     };
@@ -1055,6 +1080,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         // on the camera: 间隔 3s 短于本机身所需的 2.9s, with the interval row reading 3 s.
                         panel.clearEvidence();
                         shortfallSaid = false;
+                        retryDeviceDump();
                         applyPlanToCamera();
                         warnIfImpossible();
                     }

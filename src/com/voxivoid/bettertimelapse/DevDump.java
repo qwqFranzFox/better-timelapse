@@ -89,6 +89,59 @@ public final class DevDump {
         return attempts;
     }
 
+    /**
+     * The facts that decide whether a write can work at all, in one line, for the panel.
+     *
+     * <p>Written for a specific surprise: the write failed on every path, and the conclusion drawn from that
+     * — "this body does not let apps write to the card" — was wrong. The old TimeLapse app's own log
+     * directory is sitting at the card root, created by {@code mkdirs()} from a PMCA app with exactly the
+     * permissions this app declares. So the reason is something else, and a reason that is only ever guessed
+     * at is not a diagnosis.
+     *
+     * <p>{@code canWrite()} on the directories that matter, because the answer may well be "the card is
+     * writable and this app is not allowed to touch it" or "the card is mounted read-only right now" — two
+     * different problems with two different fixes.
+     */
+    public static String probe(Context context) {
+        StringBuilder b = new StringBuilder();
+        b.append("\u6743\u9650 ").append(hasWritePermission(context) ? "\u6709" : "\u65e0");   // 权限 有/无
+        b.append("  \u72b6\u6001 ").append(storageState());                                 // 状态 <...>
+        b.append("  /mnt/sdcard\u53ef\u5199 ").append(writable("/mnt/sdcard"));               // 可写
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext != null) b.append("  ext\u53ef\u5199 ").append(writable(ext.getPath()));
+        } catch (Throwable t) {
+            b.append("  ext=?");
+        }
+        return b.toString();
+    }
+
+    private static boolean hasWritePermission(Context context) {
+        try {
+            return context.checkCallingOrSelfPermission(
+                    "android.permission.WRITE_EXTERNAL_STORAGE") == 0;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static String storageState() {
+        try {
+            String state = Environment.getExternalStorageState();
+            return state == null ? "?" : state;
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    private static boolean writable(String path) {
+        try {
+            return new File(path).canWrite();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     // ---------------------------------------------------------------- the places, in order
 
     /**
