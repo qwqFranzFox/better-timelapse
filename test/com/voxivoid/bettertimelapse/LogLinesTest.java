@@ -152,6 +152,31 @@ class LogLinesTest {
     }
 
     @Test
+    void theSummaryCarriesTheCardsOwnTallyNextToTheLedgers() {
+        // A 20-frame run came home saying `landed=20 verified=19 missed=1` while the card's own count went
+        // 647 -> 667 and all 20 shutter callbacks arrived: nothing was missing, one walk had reported the same
+        // count twice and a frame's credit went with it. `missed=` is the ledger; `card=` is the card. Both go
+        // in, because `missed=1 card=+20` is a bookkeeping lag and `missed=11 card=+6` is eleven photographs
+        // that do not exist -- and only the second is a reason to go back to the camera.
+        String lag = LogLines.summary("done", 20, 19, 0, 1, 98_882, 20);
+        assertTrue(lag.contains("missed=1"), lag);
+        assertTrue(lag.contains("card=+20"), lag);
+
+        String real = LogLines.summary("done", 17, 6, 0, 11, 12_992, 6);
+        assertTrue(real.contains("missed=11"), real);
+        assertTrue(real.contains("card=+6"), real);
+
+        // A card that could not be counted from before the first frame says so, and does not get a zero that
+        // would read as "the card gained nothing".
+        assertTrue(LogLines.summary("done", 5, 5, 0, 0, 1000).contains("card=?"),
+                "the four-argument form has no card tally and must not invent one");
+        assertTrue(LogLines.summary("done", 5, 5, 0, 0, 1000, Frames.UNKNOWN).contains("card=?"));
+        assertTrue(LogLines.summary("done", 3, 0, 0, 3, 1000, 0).contains("card=0"));
+        assertTrue(LogLines.summary("done", 0, 0, 0, 0, 1000, -2).contains("card=-2"),
+                "a card that lost files during a run is a fact too");
+    }
+
+    @Test
     void theLogNamesWhichClockIsWhich() {
         // A press and a moment are different counters, and the first real log mixed them: four skips and one
         // shot of a five-frame plan could not be told apart from five frames.

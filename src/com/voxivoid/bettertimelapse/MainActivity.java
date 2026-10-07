@@ -671,6 +671,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         } else {
             logStartLine();
         }
+        // The run's own tally, from before its first frame. Kept apart from the walk-to-walk count the verdicts
+        // use: the baseline of THIS run, not wherever the last one left the counter.
+        cardBaseline = cardCount;
         Session.line(this, "boot firstframe=" + LogLines.ms(startupMs)
                         + " font=" + LogLines.text(UiFont.route(), "?")
                 + "\n" + "paths log=" + LogLines.text(Session.path(), "-")
@@ -693,12 +696,22 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void logStartLine() {
         int baseline = lastWalkCount == Frames.UNKNOWN ? cardCount : lastWalkCount;
+        cardBaseline = baseline;
         log(LogLines.start(cardRoot, baseline, Device.freeBytes(
                 cardRoot.length() == 0 ? null : cardRoot), startBattery));
     }
 
     /** Whether the {@code start} line is waiting for the first card walk to come back. */
     private boolean startLinePending;
+
+    /**
+     * The card's count when the run began, for the one tally that cannot be mis-attributed.
+     *
+     * <p>Every verdict compares the card against the previous walk, and a walk can report the same count
+     * twice — which loses one frame's credit for good. The count from before the first frame to after the last
+     * cannot drift that way, so it is kept separately and put next to the ledger's own number in the summary.
+     */
+    private int cardBaseline = Frames.UNKNOWN;
 
     /** What the battery said when the run started: read then, because the line is written later. */
     private int startBattery = Device.UNKNOWN;
@@ -1053,6 +1066,13 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 panel.setEvidence("\u5b58\u50a8\u5361\u8bfb\u4e0d\u5230\u4e86");              // 存储卡读不到了
             }
             accountForFrames();
+            if (engine.state() == Engine.DONE || engine.state() == Engine.FAULT
+                    || engine.state() == Engine.PAUSED) {
+                // Nothing more can be taken: what the card's total gain can still clear, it clears now, so the
+                // block ends with the counts the camera itself supports rather than with the ledger's doubt.
+                int late = unattributedCardGain();
+                for (int i = 0; i < late; i++) engine.accountFor();
+            }
             if (lastGained > 0) engine.setLastFile(cardNewest);
             if (startLinePending && cardRoot.length() > 0 && cardCount != Frames.UNKNOWN) {
                 // The run header was written before this walk came back, so the line waits for the card it is
@@ -1120,6 +1140,41 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         int landed = engine.landed();
         return landed > open ? landed - open : 0;
     }
+
+    /**
+     * Frames the card's total gain says arrived and the ledger never credited, never more than what is
+     * outstanding.
+     *
+     * <p>Only asked once the run cannot advance. A run's own tally is the files the card gained from before
+     * the first frame to after the last, and a run of 20 frames came home with that tally reading
+     * {@code 647 → 667}: twenty files for twenty frames, against a ledger of {@code landed=20 verified=19
+     * missed=1}. The one missing credit was movable, because the card had said so itself — but only in total:
+     * one walk reported {@code count=667} twice ({@code gain=0} after a {@code gain=1}), and a walk-to-walk
+     * delta has no way to tell a repeated count from a frame that never arrived. The distance between the two
+     * tallies does, and it is the two numbers the user cares about — how many frames were taken, and how many
+     * files the card gained — so it is the honest thing to close on.
+     */
+    private int unattributedCardGain() {
+        int gain = cardGain();
+        if (gain == Frames.UNKNOWN) return 0;
+        int unattributed = gain - confirmed();
+        if (unattributed <= 0) return 0;
+        int outstanding = engine.unverified();
+        return Math.min(unattributed, outstanding);
+    }
+
+    /**
+     * Frames the card can still answer for, over and over: about six seconds of walks at the verdict cadence.
+     *
+     * <p>The walk is what closes a run's ledger, so it has to be asked more than twice — the 20-frame run's
+     * last two walks both reported the same count. But a card that will never answer for a frame again (the
+     * app cannot see that part of the card at all) must not turn "shut down cleanly" into a loop, so the
+     * attempts are bounded and the run reports what it has.
+     */
+    private static final int FINAL_WALK_ATTEMPTS = 3;
+
+    /** How many of those have been used on this pause or this run's end. */
+    private int finalWalks;
 
     /**
      * The newest file on the card, and how long ago it was written.
@@ -1264,11 +1319,32 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         boolean paused = engine.state() == Engine.PAUSED;
         if (!paused && engine.midRun()) return;
         if (!paused && engine.state() != Engine.DONE && engine.state() != Engine.FAULT) return;
-        if (paused && engine.unverified() > 0) return;      // the card has not answered for the last frame yet
+        if (engine.unverified() > 0) {
+            // The ledger is not closed yet: the card has not answered for the last frame, so a count taken now
+            // would report it missing. The walk started here is the one that settles it — or asks for one more,
+            // up to the bounded number of them. Without this, a finished 20-frame run was summarised at
+            // `verified=19 missed=1` while the card's own count (647 → 667) and 20 of 20 shutter callbacks said
+            // nothing was missing.
+            if (finalWalks++ < FINAL_WALK_ATTEMPTS) {
+                handler.removeCallbacks(onVerdict);
+                handler.postDelayed(onVerdict, Frames.verdictDelayMs(engine.plan()));
+                return;
+            }
+        }
         summaryLogged = true;
         String outcome = paused ? "paused" : (engine.state() == Engine.DONE ? "done" : "fault");
         log(LogLines.summary(outcome, engine.landed(), confirmed(), engine.skipped(),
-                engine.unverified(), runStartMs()));
+                engine.unverified(), runStartMs(), cardGain()));
+    }
+
+    /**
+     * Files the card gained over the whole run, or {@link Frames#UNKNOWN} when there is no count to compare
+     * against. Not {@code lastGained} totalled up: the baseline and the latest count, nothing in between,
+     * because in between is where a repeated count loses a frame's credit.
+     */
+    private int cardGain() {
+        if (cardBaseline == Frames.UNKNOWN || cardCount == Frames.UNKNOWN) return Frames.UNKNOWN;
+        return cardCount - cardBaseline;
     }
 
     /**
@@ -1424,6 +1500,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         loggedSkipped = 0;
                         loggedState = Engine.IDLE;
                         summaryLogged = false;
+                        finalWalks = 0;
                         // The run's clock and the timetable's origin are the same instant, and both are set
                         // here — before anything slow. They used to be ten lines apart with a log header, a
                         // device dump and a card walk between them, and the session log of a 5-frame run says
@@ -1455,10 +1532,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         // Once per pause, and again the next time: the count is the card's, so it is taken
                         // after the walk this starts. See logSummary.
                         summaryLogged = false;
+                        finalWalks = 0;
                         walkCard();
                     } else if (engine.midRun()) {
                         log(LogLines.resume(runStartMs()));
                         summaryLogged = false;
+                        finalWalks = 0;
                     }
                 }
                 return true;

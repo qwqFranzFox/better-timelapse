@@ -143,9 +143,42 @@ public final class LogLines {
      */
     public static String summary(String outcome, int landed, int accounted, int skipped, int unverified,
             long elapsedMs) {
-        return "summary outcome=" + text(outcome, "done")
-                + " landed=" + landed + " verified=" + accounted + " missed=" + unverified
-                + " skipped=" + skipped + " elapsed=" + rel(elapsedMs).substring(1);
+        return summary(outcome, landed, accounted, skipped, unverified, elapsedMs, Frames.UNKNOWN);
+    }
+
+    /**
+     * The same line with the camera's own tally next to it.
+     *
+     * <p>{@code missed} and {@code card} answer two different questions and only one of them is about the
+     * photographs. {@code missed} is this app's ledger: frames the card never answered for, one walk at a
+     * time. {@code card} is the card itself: how many files it gained between the run's first count and the
+     * last one. A 20-frame run came home saying {@code landed=20 verified=19 missed=1} while
+     * {@code 647 → 667} says the card gained exactly 20 files for 20 frames and 20 of 20 shutter callbacks
+     * arrived — nothing was lost, a walk simply reported the same count twice and one frame's credit went
+     * missing. Walk-to-walk deltas can be mis-attributed that way; the cumulative count cannot.
+     *
+     * <p>So both go in, and neither is dressed up: with {@code card} present a reader can see at once whether
+     * the ledger's doubt is real. {@code missed=1 card=+20} is a bookkeeping lag; {@code missed=11 card=+6} is
+     * eleven photographs that do not exist. Only the second is a reason to go back to the camera.
+     *
+     * @param cardGain files the card gained over the whole run, or {@link Frames#UNKNOWN} when it could not be
+     *     counted from before the first frame to after the last.
+     */
+    public static String summary(String outcome, int landed, int accounted, int skipped, int unverified,
+            long elapsedMs, int cardGain) {
+        StringBuilder b = new StringBuilder("summary outcome=").append(text(outcome, "done"));
+        b.append(" landed=").append(landed);
+        b.append(" verified=").append(accounted);
+        b.append(" missed=").append(unverified);
+        b.append(" card=").append(cardGain == Frames.UNKNOWN ? "?" : signed(cardGain));
+        b.append(" skipped=").append(skipped);
+        b.append(" elapsed=").append(rel(elapsedMs).substring(1));
+        return b.toString();
+    }
+
+    /** A count that is allowed to say which way it moved: {@code +20}, {@code -3}, {@code 0}. */
+    public static String signed(int value) {
+        return (value > 0 ? "+" : "") + value;
     }
 
     /** The moment the timetable was armed: every {@code at=} after it is measured from here. */
