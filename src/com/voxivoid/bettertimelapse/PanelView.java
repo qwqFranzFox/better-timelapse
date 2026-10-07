@@ -84,6 +84,17 @@ public final class PanelView extends View {
     private String numbers = "";
     private String roots = "";
 
+    /**
+     * A page of text to read on the panel, or null.
+     *
+     * <p>For the answers that do not fit anywhere: this body reports 298 live parameters, the filter that
+     * matters matches dozens, and the file they were written to cannot be read back off this camera. A
+     * photograph of a screen is a poor channel, but it is the only one there is — so the panel can show the
+     * text a page at a time, with the state line always visible above it and the wheel turning the pages.
+     */
+    private String[] pageLines;
+    private int page;
+
     /** Called once, the first time a frame is actually drawn. */
     private Runnable onFirstDraw;
     private boolean drewOnce;
@@ -170,6 +181,68 @@ public final class PanelView extends View {
 
     public void setPlanListener(PlanListener listener) {
         planListener = listener;
+    }
+
+    /** Show a text, a screenful at a time. Null or empty closes the reader. */
+    public void showText(String text) {
+        if (text == null || text.length() == 0) {
+            pageLines = null;
+        } else {
+            pageLines = text.split("\n");
+            page = 0;
+        }
+        invalidate();
+    }
+
+    public void closeText() {
+        pageLines = null;
+        invalidate();
+    }
+
+    public boolean reading() {
+        return pageLines != null && pageLines.length > 0;
+    }
+
+    /** Turn a page: forward for a positive direction, wrapping at both ends. */
+    public void turnPage(int direction) {
+        if (!reading()) return;
+        int count = pageCount();
+        page = ((page + direction) % count + count) % count;
+        invalidate();
+    }
+
+    public int pageNumber() {
+        return page + 1;
+    }
+
+    public int pageCount() {
+        int perPage = linesPerPage();
+        return Math.max(1, (pageLines.length + perPage - 1) / perPage);
+    }
+
+    /** How many lines a page holds: the rows' band, at the notes' text size. */
+    private int linesPerPage() {
+        if (smallSize <= 0f) return 8;
+        int fits = (int) Math.floor((rowHeight * rowsVisible) / lineHeight());
+        return Math.max(4, Math.min(16, fits));
+    }
+
+    /** The reader's own drawing: the rows' band, one page of text, line by line. */
+    private void drawText(Canvas canvas, float w, float top, float height) {
+        paint.setTextSize(smallSize);
+        paint.setColor(colText);
+        int perPage = linesPerPage();
+        int first = page * perPage;
+        float y = top + lineHeight();
+        for (int i = 0; i < perPage && first + i < pageLines.length; i++) {
+            canvas.drawText(clip(pageLines[first + i], w - padding * 2f), padding, y, paint);
+            y += lineHeight();
+            if (y > top + height) break;
+        }
+        paint.setColor(colAccent);
+        String mark = "\u9875 " + pageNumber() + " / " + pageCount();                       // 页 n / m
+        canvas.drawText(mark, padding, top + height - paint.descent(), paint);
+        paint.setColor(colDim);
     }
 
     /** TRASH: cycle how much of the panel is on screen. */
@@ -407,7 +480,11 @@ public final class PanelView extends View {
         drawStatus(canvas, w, y, statusHeight);
         y += statusHeight;
 
-        y = drawRows(canvas, w, y, rowHeight * rowsVisible);
+        if (reading()) {
+            drawText(canvas, w, y, rowHeight * rowsVisible + progressHeight);
+        } else {
+            y = drawRows(canvas, w, y, rowHeight * rowsVisible);
+        }
 
         // The diagnostics live under the progress block and grow upwards from the legend, so the two used
         // to be drawn through each other the moment there were three of them: the photograph shows 卡根 and

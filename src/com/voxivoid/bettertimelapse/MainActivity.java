@@ -356,20 +356,53 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void writeDeviceDump() {
         dumpAttempts++;
+        String written = DevDump.write(this, deviceReport());
+        if (written.length() == 0) {
+            // Nothing on the card would take it. There is no adb on this camera and no way to pull an app's
+            // private files, so the reason has to fit on one line — and the answer to the question the dump
+            // was written for goes on the panel by itself, because a photograph of it is then the only way
+            // this data leaves the camera.
+            panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5199\u4e0d\u8fdb\u53bb\uff1a"      // 设备清单写不进去：
+                    + DevDump.attempts() + "  " + DevDump.probe(this));
+            panel.setRoots("曝光键 " + camera.exposureReport());
+        } else if (!DevDump.onCard()) {
+            // It landed in private storage, which on this camera cannot be retrieved at all: no adb, and
+            // pmca-console has no command that pulls an app's files. So the panel carries both halves of what
+            // the file was for — why every place on the card refused it, and the keys that could answer the
+            // question it was written for.
+            panel.setEvidence("\u5361\u4e0a\u5199\u4e0d\u8fdb\uff08" + DevDump.attempts()      // 卡上写不进（
+                    + "\uff09  " + DevDump.probe(this));                                      // ）
+            panel.setRoots("曝光键 " + camera.exposureReport());
+        } else {
+            panel.setCameraNote(camera.capabilities().summary(camera.previewing())
+                    + "  \u6e05\u5355 " + written);                                          // 清单 <路径>
+        }
+    }
+
+    /**
+     * What the camera says about itself, as text.
+     *
+     * <p>Written to the card when the card will take it, and readable on the panel at any time (hold MENU):
+     * the answers are several screens long, this camera has no adb, and it will not let an app write where a
+     * computer can read. A photograph of a screen is a poor channel, but it is the one that works.
+     */
+    private String deviceReport() {
         Plan plan = engine.plan();
         StringBuilder b = new StringBuilder();
-        b.append("# better-timelapse device dump\n");
-        b.append("# what the camera says about itself, written once per launch, overwritten each time.\n");
-        b.append("# the question it exists for: can this app read the shutter speed? see parameterKeys.\n");
+        b.append("# better-timelapse device report\n");
+        b.append("# what the camera says about itself. Hold MENU to read it on the panel;\n");
+        b.append("# the question it exists for: can this app read the shutter speed?\n");
         b.append("\n[identity]\n");
         b.append("model.name       = ").append(SonyCamera.property("model.name")).append('\n');
         b.append("version.platform = ").append(SonyCamera.property("version.platform")).append('\n');
         b.append("preview          = ").append(camera.previewing() ? "running" : "not running").append('\n');
         b.append("preview.problem  = ").append(camera.previewProblem()).append('\n');
+        b.append("\n[the exposure family: name = value]\n");
+        b.append(camera.exposureReport()).append('\n');
         b.append("\n[settings this app can read back]\n");
         b.append("silent-shutter-mode = ").append(camera.silentShutterHeld()).append('\n');
         b.append("drive-mode          = ").append(camera.driveModeHeld()).append('\n');
-        b.append("\n[the keys that could carry a shutter or exposure setting]\n");
+        b.append("\n[keys that could carry a shutter or exposure setting]\n");
         b.append(camera.parameterKeys()).append('\n');
         b.append("\n[every live parameter, as the camera reports it]\n");
         b.append(camera.parametersFlat()).append('\n');
@@ -390,28 +423,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 .append(" panelOff=").append(plan.get(Plan.ROW_PANEL_OFF)).append('\n');
         b.append("shortest.interval=").append(body.shortestIntervalMs(plan)).append('\n');
         b.append("body.busy.lower.bound=").append(body.lowerBoundMs()).append('\n');
-
-        String written = DevDump.write(this, b.toString());
-        if (written.length() == 0) {
-            // Nothing on the card would take it. There is no adb on this camera and no way to pull an app's
-            // private files, so the reason has to fit on one line — and the answer to the question the dump
-            // was written for goes on the panel by itself, because a photograph of it is then the only way
-            // this data leaves the camera.
-            panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5199\u4e0d\u8fdb\u53bb\uff1a"      // 设备清单写不进去：
-                    + DevDump.attempts() + "  " + DevDump.probe(this));
-            panel.setRoots("\u66dd\u5149\u952e " + camera.exposureReport());                  // 曝光键
-        } else if (!DevDump.onCard()) {
-            // It landed in private storage, which on this camera cannot be retrieved at all: no adb, and
-            // pmca-console has no command that pulls an app's files. So the panel carries both halves of what
-            // the file was for — why every place on the card refused it, and the keys that could answer the
-            // question it was written for.
-            panel.setEvidence("\u5361\u4e0a\u5199\u4e0d\u8fdb\uff08" + DevDump.attempts()      // 卡上写不进（
-                    + "\uff09  " + DevDump.probe(this));                                      // ）
-            panel.setRoots("\u53c2\u6570\u952e " + camera.parameterKeys());                  // 参数键
-        } else {
-            panel.setCameraNote(camera.capabilities().summary(camera.previewing())
-                    + "  \u6e05\u5355 " + written);                                          // 清单 <路径>
-        }
+        return b.toString();
     }
 
     /**
@@ -426,7 +438,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void retryDeviceDump() {
         if (DevDump.onCard() || dumpAttempts >= DUMP_ATTEMPTS_MAX) return;
-        dumpAttempts++;
         writeDeviceDump();
     }
 
@@ -997,6 +1008,28 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         int scan = event.getScanCode();
         int repeat = event.getRepeatCount();
 
+        // While a text is on screen the keys belong to it: the wheel and the arrows turn pages, anything else
+        // closes the reader rather than acting on a run the user cannot see.
+        if (panel.reading()) {
+            switch (scan) {
+                case Keys.K_WHEEL_CW:
+                case Keys.K_DIAL_CW:
+                case Keys.K_RIGHT:
+                case Keys.K_DOWN:
+                    if (repeat == 0) panel.turnPage(1);
+                    return true;
+                case Keys.K_WHEEL_CCW:
+                case Keys.K_DIAL_CCW:
+                case Keys.K_LEFT:
+                case Keys.K_UP:
+                    if (repeat == 0) panel.turnPage(-1);
+                    return true;
+                default:
+                    panel.closeText();
+                    return true;
+            }
+        }
+
         // Swallowed so the firmware never sees them: AEL, C1, DISP and PLAY are not bound, and letting
         // them through is how a camera's own menu interrupts a run.
         if (Keys.swallowed(scan)) return true;
@@ -1216,12 +1249,19 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         }
     };
 
-    /** MENU held: the app menu, which does not exist yet. */
+    /**
+     * MENU held: the text reader.
+     *
+     * <p>The app menu is still to come (docs/PLAN.md §4.3) and this is where its most useful page already
+     * is: what the camera says about itself, a screenful at a time, so a photograph can carry it off a
+     * device that has no adb and will not let an app write to the card. Wheel or arrows turn the pages;
+     * any other key closes it.
+     */
     private final Runnable onMenuHold = new Runnable() {
         @Override
         public void run() {
-            menu.fire();
-            panel.setCameraNote("\u83dc\u5355\uff1a\u5c1a\u672a\u5b9e\u73b0");   // 菜单：尚未实现
+            if (menu.fire() != Keys.Hold.HOLD) return;
+            if (!engine.midRun()) panel.showText(deviceReport());
         }
     };
 }
