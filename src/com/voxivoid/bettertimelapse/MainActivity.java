@@ -341,6 +341,63 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     };
 
     /**
+     * Write what the camera says about itself to a file on the card.
+     *
+     * <p>For the question the screen cannot hold: whether this body exposes a shutter speed, and under what
+     * name. {@code parameterKeys()} has been filtering the live parameters for a {@code shutter} key since
+     * the skeleton and had no caller — there was nowhere to put an answer several screens long. Now there
+     * is, and the two questions that matter for the minimum interval (the exposure, and what the body says
+     * it can do) can be answered from data instead of from reasoning.
+     *
+     * <p>A write that fails is reported on the panel: a diagnostic file nobody can find is worse than none.
+     */
+    private void writeDeviceDump() {
+        Plan plan = engine.plan();
+        StringBuilder b = new StringBuilder();
+        b.append("# better-timelapse device dump\n");
+        b.append("# what the camera says about itself, written once per launch, overwritten each time.\n");
+        b.append("# the question it exists for: can this app read the shutter speed? see parameterKeys.\n");
+        b.append("\n[identity]\n");
+        b.append("model.name       = ").append(SonyCamera.property("model.name")).append('\n');
+        b.append("version.platform = ").append(SonyCamera.property("version.platform")).append('\n');
+        b.append("preview          = ").append(camera.previewing() ? "running" : "not running").append('\n');
+        b.append("preview.problem  = ").append(camera.previewProblem()).append('\n');
+        b.append("\n[settings this app can read back]\n");
+        b.append("silent-shutter-mode = ").append(camera.silentShutterHeld()).append('\n');
+        b.append("drive-mode          = ").append(camera.driveModeHeld()).append('\n');
+        b.append("\n[the keys that could carry a shutter or exposure setting]\n");
+        b.append(camera.parameterKeys()).append('\n');
+        b.append("\n[every live parameter, as the camera reports it]\n");
+        b.append(camera.parametersFlat()).append('\n');
+        b.append("\n[camera capabilities]\n");
+        b.append(camera.capabilities().summary(camera.previewing())).append('\n');
+        b.append("\n[CameraEx methods]\n");
+        b.append(camera.cameraExMethods()).append('\n');
+        b.append("\n[parameter modifier methods]\n");
+        b.append(camera.modifierMethods()).append('\n');
+        b.append("\n[the plan in force]\n");
+        b.append("interval=").append(plan.intervalMs())
+                .append(" frames=").append(plan.frames())
+                .append(" delay=").append(plan.delayMs())
+                .append(" settle=").append(plan.settleMs())
+                .append(" silent=").append(plan.get(Plan.ROW_SILENT))
+                .append(" drive=").append(plan.driveMode())
+                .append(" ael=").append(plan.get(Plan.ROW_AEL))
+                .append(" panelOff=").append(plan.get(Plan.ROW_PANEL_OFF)).append('\n');
+        b.append("shortest.interval=").append(body.shortestIntervalMs(plan)).append('\n');
+        b.append("body.busy.lower.bound=").append(body.lowerBoundMs()).append('\n');
+
+        String written = DevDump.write(b.toString());
+        if (written.length() == 0) {
+            panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5199\u4e0d\u8fdb\u53bb\uff1a"      // 设备清单写不进去：
+                    + DevDump.problem());
+        } else {
+            panel.setCameraNote(camera.capabilities().summary(camera.previewing())
+                    + "  \u6e05\u5355 " + written);                                          // 清单 <路径>
+        }
+    }
+
+    /**
      * Put the body back the way this app found it.
      *
      * <p>The exit rule, promised in docs/DECISIONS.md A10 and never implemented until now: the app sets
@@ -385,6 +442,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         callbackHintMs = 0;
         seedPlanFromCamera();
         applyPlanToCamera();
+        writeDeviceDump();
     }
 
     /**

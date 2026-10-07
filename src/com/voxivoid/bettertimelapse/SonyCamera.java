@@ -630,6 +630,24 @@ public final class SonyCamera {
      * Every parameter name the body reports, from {@code Camera.Parameters.flatten()}. Guessing these
      * is what turned "silent shutter" into a dead setting: the names are the camera's, not the SDK's.
      */
+    /**
+     * Every live parameter, exactly as the camera reports it.
+     *
+     * <p>The unfiltered answer to "what will this body tell us about itself", for the device dump. The
+     * filtered version below is what fits on a screen; a key nobody thought to look for only shows up here.
+     */
+    public String parametersFlat() {
+        if (camera == null) return "(no camera)";
+        try {
+            String flat = camera.getParameters().flatten();
+            if (flat == null) return "(no parameters)";
+            // One per line: flatten() uses ';' and the values contain commas, so this is the readable form.
+            return flat.replace(";", "\n");
+        } catch (Throwable t) {
+            return "(flatten failed: " + shortName(t) + ")";
+        }
+    }
+
     public String parameterKeys() {
         if (camera == null) return "(no camera)";
         try {
