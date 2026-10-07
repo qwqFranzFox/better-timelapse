@@ -974,8 +974,15 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // camera reports the frame.
         engine.step(Engine.EV_UNVERIFIED, now());
         pump();
+        if (!engine.plan().cardCheck()) {
+            // 卡上核对 is off: no read, and the shutter callback is the whole verdict. The frame is accounted
+            // for where it is already known to have happened -- `EV_UNVERIFIED` above moved the engine on, and
+            // this closes the ledger for it -- so `核实` stops meaning "a file exists" and starts meaning "the
+            // body said it took the frame", which is exactly what the row says it does.
+            accountFromCallback();
+        }
         handler.removeCallbacks(onVerdict);
-        handler.postDelayed(onVerdict, Frames.verdictDelayMs(engine.plan()));
+        if (engine.plan().cardCheck()) handler.postDelayed(onVerdict, Frames.verdictDelayMs(engine.plan()));
         // The frame is over, so this is the stretch in which the panel has nothing to show. A timer, never a
         // call: switching the display output is a platform call with a surface behind it, and nothing slow may
         // sit between a frame's due moment and its shutter (docs/DECISIONS.md A19).
@@ -999,6 +1006,22 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private void frameSettled() {
         armPanelOff();
         armPanelWake();
+    }
+
+    /**
+     * Close the ledger for a frame the body has reported, with no card involved.
+     *
+     * <p>This is the old app's accounting and it is worth naming as such: the app believes the body, and
+     * nothing can contradict it. What it costs is the thing this project was built for — a run that takes
+     * seventeen frames and keeps six can no longer be seen to have done so (docs/PAIN-FACTS: A9, A28, A40) —
+     * which is why it is a row on the panel and not a decision taken here.
+     */
+    private void accountFromCallback() {
+        if (engine.unverified() <= 0) return;
+        engine.accountFor();
+        if (engine.landed() > 0) {
+            log(LogLines.verdict(engine.fired(), Frames.UNKNOWN, 0, true, 0) + " look=callback");
+        }
     }
 
     // ================================================================ the panel between frames
@@ -1102,6 +1125,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private final Runnable onPanelOff = new Runnable() {
         @Override
         public void run() {
+            // The gate is the engine's state, never the card: with the check off there is no walk to wait for,
+            // and with it on the walk has its own timer. Both darken once the frame has finished -- which is the
+            // condition the user described from outside the app, as the screen waiting for the file.
             String late = panelRefusal();
             if (late.length() > 0) {
                 // Refused at the last moment, which is a different fact from refused when it was armed: the

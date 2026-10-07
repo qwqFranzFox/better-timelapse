@@ -130,6 +130,34 @@ class PlanTest {
     }
 
     @Test
+    void everyRowThePanelDrawsHasAValueAndATurn() {
+        // The card-check row is the ninth, and a row that exists in the plan but not in the step table would be
+        // a key that does nothing -- the failure this project has fixed more than once. So: every row has a
+        // label, a value the panel can draw and a turn the wheel can make.
+        for (int row = 0; row < Plan.ROW_COUNT; row++) {
+            assertTrue(Hud.rowLabel(row).length() > 0, "row " + row + " has no label");
+            assertTrue(Hud.rowValue(new Plan(), row).length() > 0, "row " + row + " draws nothing");
+            Plan plan = new Plan();
+            int before = plan.get(row);
+            int after = Steps.apply(row, before, false, 1);
+            assertTrue(after != before || before == Plan.FRAMES_UNLIMITED,
+                    "row " + row + " cannot be turned");
+        }
+    }
+
+    @Test
+    void theCardCheckIsOnByDefaultAndCanBeTurnedOff() {
+        Plan p = new Plan();
+        assertTrue(p.cardCheck(), "reading the card is what makes 核实 a statement about files");
+        p.set(Plan.ROW_CARD_CHECK, 0);
+        assertFalse(p.cardCheck());
+        p.set(Plan.ROW_CARD_CHECK, 1);
+        assertTrue(p.cardCheck());
+        // It is a plan row, not a body setting: it changes nothing on the camera, so it is not locked mid-run.
+        assertFalse(Hud.cameraRow(Plan.ROW_CARD_CHECK));
+    }
+
+    @Test
     void theDriveModeHasOneSpellingForTheCamera() {
         // Two spellings of one wire value is how a setting stops taking effect in one direction: this
         // mapping is used both when a run starts and when the body is put back on the way out.

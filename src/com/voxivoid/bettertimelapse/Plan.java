@@ -18,8 +18,8 @@ public final class Plan {
     // ---------------------------------------------------------------- the rows, in panel order
     /** The rows the panel shows, in order. Adding one means adding a label and a value formatter. */
     public static final int ROW_INTERVAL = 0, ROW_FRAMES = 1, ROW_DELAY = 2, ROW_SETTLE = 3,
-            ROW_SILENT = 4, ROW_DRIVE = 5, ROW_AEL = 6, ROW_PANEL_OFF = 7;
-    public static final int ROW_COUNT = 8;
+            ROW_SILENT = 4, ROW_DRIVE = 5, ROW_AEL = 6, ROW_PANEL_OFF = 7, ROW_CARD_CHECK = 8;
+    public static final int ROW_COUNT = 9;
 
     /** Drive modes, as the labels the camera menus use. */
     public static final int DRIVE_SINGLE = 0, DRIVE_BURST = 1, DRIVE_BRACKET3 = 2;
@@ -65,6 +65,13 @@ public final class Plan {
         wanted[ROW_DRIVE] = DRIVE_SINGLE;
         wanted[ROW_AEL] = 0;
         wanted[ROW_PANEL_OFF] = 1;   // on: a lit panel is the last thing a long night shoot needs
+        // On by default, because reading the card is what turns "the app pressed the shutter" into "the card
+        // has the file", and that distinction is the reason this project exists (docs/DECISIONS.md A9). It is a
+        // row rather than a constant because it is also the app's only claim on the camera's storage between
+        // frames: the camera asks to repair its card data after runs at 10s and 15s but not at 5s, and the one
+        // experiment that can tell "our reading does this" from "the camera minds the idle time" is to switch
+        // the reading off and run the same plan (A49).
+        wanted[ROW_CARD_CHECK] = 1;
         System.arraycopy(wanted, 0, stored, 0, ROW_COUNT);
     }
 
@@ -146,6 +153,11 @@ public final class Plan {
 
     public boolean autoExposureLock() {
         return wanted[ROW_AEL] != 0;
+    }
+
+    /** Whether this run reads the card to confirm each frame, or trusts the shutter callback alone. */
+    public boolean cardCheck() {
+        return wanted[ROW_CARD_CHECK] != 0;
     }
 
     public boolean panelOff() {

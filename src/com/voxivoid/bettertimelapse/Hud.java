@@ -62,6 +62,7 @@ public final class Hud {
             "\u9a71\u52a8\u6a21\u5f0f", // 驱动模式
             "AEL",
             "\u5173\u5c4f",           // 关屏
+            "\u5361\u4e0a\u6838\u5bf9",   // 卡上核对
     };
 
     public static String rowLabel(int row) {
@@ -102,6 +103,8 @@ public final class Hud {
                 return plan.autoExposureLock() ? ON : OFF;
             case Plan.ROW_PANEL_OFF:
                 return plan.panelOff() ? ON : OFF;
+            case Plan.ROW_CARD_CHECK:
+                return plan.cardCheck() ? ON : OFF;
             default:
                 return "";
         }
@@ -150,6 +153,15 @@ public final class Hud {
                     return "\u95f4\u9694\u592a\u77ed\uff0c\u5173\u4e0d\u4e86\u5c4f";            // 间隔太短，关不了屏
                 }
                 return "\u6bcf\u5f20\u4e4b\u540e\u5173\u5c4f";                                 // 每张之后关屏
+            case Plan.ROW_CARD_CHECK:
+                // The honest consequence of the value, because the difference is one the user will notice in a
+                // finished night rather than in the panel: with the check on, "核实" is a statement about files
+                // that exist; with it off, every frame the shutter reported counts as taken and nothing can
+                // contradict that. That is the old app's behaviour, and it is a choice rather than a bug only
+                // when it is written down where the choice is made.
+                return plan.cardCheck()
+                        ? "\u6bcf\u5f20\u8bfb\u5361\u6838\u5bf9"                    // 每张读卡核对
+                        : "\u53ea\u8ba1\u5feb\u95e8\u56de\u62a5";                  // 只计快门回报
             case Plan.ROW_SILENT:
                 // These two were the wrong way round: "每张不动机械快门" is what the row does when the
                 // silent shutter is ON, and it was being shown when it was off. What the user needs is the

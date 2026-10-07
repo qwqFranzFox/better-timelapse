@@ -57,7 +57,8 @@ public final class LogLines {
                 + " drive=" + Plan.driveWire(plan.driveMode())
                 + " silent=" + onOff(plan.silentShutter())
                 + " ael=" + onOff(plan.autoExposureLock())
-                + " paneloff=" + onOff(plan.panelOff());
+                + " paneloff=" + onOff(plan.panelOff())
+                + " cardcheck=" + onOff(plan.cardCheck());
     }
 
     /** Where the run is writing and what the camera looked like when it started. */
@@ -281,6 +282,7 @@ public final class LogLines {
             case Plan.ROW_DRIVE: return "drive";
             case Plan.ROW_AEL: return "ael";
             case Plan.ROW_PANEL_OFF: return "paneloff";
+            case Plan.ROW_CARD_CHECK: return "cardcheck";
             default: return "row" + row;
         }
     }

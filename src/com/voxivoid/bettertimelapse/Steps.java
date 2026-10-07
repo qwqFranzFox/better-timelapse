@@ -115,7 +115,8 @@ public final class Steps {
             int n = Plan.DRIVE_COUNT;
             return ((value + direction) % n + n) % n;
         }
-        if (row == Plan.ROW_SILENT || row == Plan.ROW_AEL || row == Plan.ROW_PANEL_OFF) {
+        if (row == Plan.ROW_SILENT || row == Plan.ROW_AEL || row == Plan.ROW_PANEL_OFF
+                || row == Plan.ROW_CARD_CHECK) {
             return value != 0 ? 0 : 1;
         }
         // The frames row walks through "unlimited" on its way up and back down again, so the state
