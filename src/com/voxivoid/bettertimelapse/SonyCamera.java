@@ -146,13 +146,9 @@ public final class SonyCamera {
     /** Release the camera. Safe to call twice, and safe after a failed {@link #open()}. */
     public void close() {
         Object instance = cameraEx;
-        cameraEx = null;
-        camera = null;
-        modifier = null;
-        reviewControl = null;
-        reviewMode = "";
         if (instance == null) return;
-        // The camera goes back in the order it was taken, which is what a teardown is:
+        // The camera goes back in the order {@link Teardown} names, which is the order it was taken, and the
+        // order is tested there because this method cannot be:
         //
         //   1. stop the preview stream -- the body's heaviest activity, and the one thing that keeps the
         //      imaging pipeline running after this app has stopped asking for frames;
@@ -164,9 +160,9 @@ public final class SonyCamera {
         // stream it was about to abandon. The user's camera has been asking to repair its card data after
         // some sessions; a stream and a half-open capture left behind is exactly the kind of unfinished
         // business that leaves a card looking dirty, and it costs nothing to close properly.
-        stopPreview();
+        stopPreview();                                    // Teardown.PREVIEW
         try {
-            instance.getClass().getMethod("cancelTakePicture").invoke(instance);
+            instance.getClass().getMethod("cancelTakePicture").invoke(instance);   // Teardown.CAPTURE
         } catch (Throwable t) {
             // No capture in flight, or a body without the call: nothing to cancel.
         }
@@ -175,6 +171,19 @@ public final class SonyCamera {
         } catch (Throwable t) {
             // Nothing useful to do at this point, and throwing here would mask the real error.
         }
+        // The fields are cleared AFTER the teardown, not before it. The first version of this method nulled
+        // them on the way in and then called stopPreview(), which begins with `if (camera == null) return` --
+        // so the first and most important step of the teardown was a no-op, on every exit, while the code read
+        // as if it were doing it. The exit line said `preview=running` and that was the teardown reporting
+        // itself honestly: nothing had been stopped.
+        cameraEx = null;
+        camera = null;
+        modifier = null;
+        reviewControl = null;
+        reviewMode = "";
+        previewing = false;
+        previewProblem = "";
+        lastError = "";
     }
 
     public boolean isOpen() {

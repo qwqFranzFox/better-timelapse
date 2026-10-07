@@ -41,4 +41,5 @@ UNITS=(
     LogLines
     DisplayApi
     Screen
+    Teardown
 )
