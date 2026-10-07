@@ -241,8 +241,7 @@ class FramesTest {
         // lit for 2.5s before every frame, which is what the user saw and objected to.
         Plan slow = plan(10_000, 10);
         assertEquals(700, Frames.panelLitMs(slow));
-        assertEquals(8300, slow.intervalMs() - Frames.panelOffDelayMs(slow) - Frames.panelLitMs(slow),
-                "the dark stretch of a ten-second interval");
+        assertEquals(2750, Frames.panelDarkMs(slow), "capped at the stretch this body is known to tolerate");
     }
 
     @Test
@@ -262,14 +261,19 @@ class FramesTest {
         // written from the arithmetic of an older rule and both were wrong.
         assertFalse(Frames.panelStaysOff(plan(2132, 10)), "less than the floor of darkness is a flash");
         assertTrue(Frames.panelStaysOff(plan(2133, 10)), "exactly the floor is still worth switching");
-        // Past 2800ms the lit stretch is pinned at the floor, so the dark window is just the wait: on this
-        // body's 10s interval the panel is lit for 0.7s and dark for 8.3s of every 10.
-        assertEquals(8300, Frames.panelDarkMs(plan(10_000, 10)));
+        // And the dark window is capped, because the body objects to a long one: measured, 5s (2750ms dark)
+        // is clean and 10s (8300ms dark) makes the camera ask to repair its card data at the next power-on.
+        // So no plan gets more than the proven-safe stretch, and a long interval is lit for the rest of its
+        // wait instead. That is a real cost and it is deliberate.
+        assertEquals(2750, Frames.panelDarkMs(plan(10_000, 10)));
+        assertEquals(2750, Frames.panelDarkMs(plan(60_000, 10)), "a minute of interval does not buy more dark");
         assertEquals(0, Frames.panelDarkMs(plan(2132, 10)), "a plan that cannot darken gets no window");
+        // 5s is where the safe value came from: it is under the cap and therefore unchanged.
+        assertEquals(2750, Frames.panelDarkMs(plan(5000, 10)), "the safe value came from 5s, and is the cap");
         // The wake still has an answer everywhere: a plan with no dark stretch is a plan whose panel is simply
         // on, and the wake is what guarantees that.
-        // At 2s the lit stretch is the quarter (500ms), not the 700ms floor, so the wake is at due-500.
-        assertEquals(1500, Frames.panelWakeAtMs(plan(2000, 10), 0, 2000));
+        // At 2s there is no dark window at all, so the wake is as early as it can be: now.
+        assertEquals(1000, Frames.panelWakeAtMs(plan(2000, 10), 0, 2000));
         // This body's own floor -- the shortest interval it will shoot at all -- has room to spare.
         assertTrue(Frames.panelStaysOff(plan(3700, 10)));
     }
@@ -279,9 +283,9 @@ class FramesTest {
         // The wake is an instant, not a wait: a frame answered 2 seconds late must not push its own wake-up
         // late with it, because the failure this exists to prevent is a panel still dark when the shutter is
         // asked for. now=0, frame due at 5000, lit stretch 1250 -> on at 3750.
-        assertEquals(4300, Frames.panelWakeAtMs(plan(5000, 10), 0, 5000),
-                "5000 - 700: the panel is lit for the floor, not for a quarter of the interval");
-        assertEquals(9300, Frames.panelWakeAtMs(plan(5000, 10), 5000, 10_000));
+        // 5s is exactly at the cap: dark from 3500 to 6250, so the panel is back 1250ms before the frame.
+        assertEquals(3750, Frames.panelWakeAtMs(plan(5000, 10), 0, 5000));
+        assertEquals(8750, Frames.panelWakeAtMs(plan(5000, 10), 5000, 10_000));
 
         // Inside the lit window already: wake where we stand rather than in the past.
         assertEquals(4000, Frames.panelWakeAtMs(plan(5000, 10), 4000, 4600));

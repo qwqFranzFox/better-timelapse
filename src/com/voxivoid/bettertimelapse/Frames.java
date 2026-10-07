@@ -327,13 +327,46 @@ public final class Frames {
      */
     public static boolean panelStaysOff(Plan plan) {
         if (plan.intervalMs() <= PANEL_OFF_AFTER_MS + panelLitMs(plan)) return false;
-        return plan.intervalMs() - PANEL_OFF_AFTER_MS - panelLitMs(plan) >= PANEL_MIN_DARK_MS;
+        return panelDarkMs(plan) >= PANEL_MIN_DARK_MS;
     }
 
-    /** The dark window a plan would actually get, in milliseconds, or {@code 0} when it gets none. */
+    /**
+     * The longest the panel is left dark, however long the interval is.
+     *
+     * <p>Measured on the camera, and the reason this cap exists: switching the display output away for a long
+     * stretch makes the body ask to repair its card data at the next power-on. Not the interval, not the card,
+     * not this app's card reading — the user separated all three:
+     *
+     * <pre>
+     *   5s,  关屏 ON    dark 2750ms   no repair
+     *   10s, 关屏 ON    dark 8300ms   repair
+     *   10s, 关屏 OFF   no screen-off no repair
+     *   (and at 5s the screen is switched off twelve times a minute, so it is not how often)
+     * </pre>
+     *
+     * <p>So it is how long the output stays away in one go. The cap is set at exactly the window the 5s run
+     * used, 2750ms, for two reasons: it leaves that configuration untouched, down to the millisecond, so the
+     * measurement it came from stays valid; and it does not spend any of the distance to the unsafe value,
+     * 8300ms, on a guess. What is left in between is for a later experiment to claim, with the row that
+     * switches this off entirely as the way to test it (docs/DECISIONS.md A50).
+     *
+     * <p>What the cap costs is the feature's whole point on a long interval: at 15s the panel is lit for
+     * 11.25s of every 15 instead of being dark for 13.3s of it. A dark screen is worth less than a card the
+     * camera thinks is damaged.
+     */
+    public static final long PANEL_DARK_MAX_MS = 2750;
+
+    /**
+     * The dark window a plan would actually get, in milliseconds, or {@code 0} when it gets none.
+     *
+     * <p>Capped at {@link #PANEL_DARK_MAX_MS}: the body tolerates a short stretch with its output switched
+     * away and objects to a long one, so the panel stays lit for the remainder of a long interval instead of
+     * risking the card.
+     */
     public static long panelDarkMs(Plan plan) {
-        if (!panelStaysOff(plan)) return 0;
-        return plan.intervalMs() - PANEL_OFF_AFTER_MS - panelLitMs(plan);
+        long asked = plan.intervalMs() - PANEL_OFF_AFTER_MS - panelLitMs(plan);
+        if (asked < PANEL_MIN_DARK_MS) return 0;
+        return Math.min(asked, PANEL_DARK_MAX_MS);
     }
 
     /**
@@ -384,7 +417,11 @@ public final class Frames {
      */
     public static long panelWakeAtMs(Plan plan, long nowMs, long dueMs) {
         if (dueMs == Schedule.NONE) return Schedule.NONE;
-        long wakeAt = dueMs - panelLitMs(plan);
+        // The wake is the far end of the capped dark window, and the lit stretch before the frame is whatever
+        // is left of the interval after it: on a long interval that is minutes of light rather than the 700ms
+        // floor, which is the cost of not keeping the output away from the body for longer.
+        long lit = Math.max(panelLitMs(plan), plan.intervalMs() - PANEL_OFF_AFTER_MS - panelDarkMs(plan));
+        long wakeAt = dueMs - lit;
         return wakeAt - nowMs <= 0 ? nowMs : wakeAt;    // already inside the window: wake where we stand
     }
 }
