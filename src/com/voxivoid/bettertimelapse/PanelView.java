@@ -71,18 +71,20 @@ public final class PanelView extends View {
 
     // ---- what the shell knows that the engine does not ----
     private String cameraNote = "";
-    private String fontNote = "";
 
     /**
-     * A font failure, on its own line above the legend, where nothing else can overwrite it. The
-     * camera note shares the status line with the plan summary and the state, so a long message there
-     * gets clipped or replaced by whatever the shell says next — which is how the reason for two
-     * rounds of "boxes on screen" stayed invisible.
+     * The diagnostics band, and all that is left on it.
+     *
+     * <p>A screen collects debug text the way a desk collects paper. 卡增/核实/落盘/读数/回执/机身, the card
+     * root, the newest file, the font route, the startup time: every one of them earned its place while the
+     * thing it measured was broken, and every one of them is in the session log on the card now, where it can
+     * be read as a file rather than photographed. What stays is what the person at the camera has to act on:
+     * the first thing that went wrong with this run, why the labels are boxes if they are, and whether the
+     * run is being recorded at all.
      */
     private String fontError = "";
     private String evidence = "";
-    private String numbers = "";
-    private String roots = "";
+    private String logNote = "";
 
     /**
      * A page of text to read on the panel, or null.
@@ -99,8 +101,6 @@ public final class PanelView extends View {
     private Runnable onFirstDraw;
     private boolean drewOnce;
 
-    /** How long the app took to draw its first frame, or 0 before it has. */
-    private long startupMs;
     private int batteryPercent = -1;
     private boolean charging;
     private long cardFreeBytes = -1;
@@ -295,25 +295,9 @@ public final class PanelView extends View {
         return dryRun;
     }
 
-    /**
-     * Which route the bundled font was loaded by, drawn small in the legend row. It is the one line
-     * that separates "the app cannot draw Chinese" from "the app is broken", and it costs nothing:
-     * it is the only way to tell, from a photograph of the screen, whether the font is even in use.
-     */
-    public void setFontNote(String note) {
-        fontNote = note == null ? "" : note;
-        invalidate();
-    }
-
     /** Told once, when the first frame has been drawn. */
     public void setOnFirstDraw(Runnable callback) {
         onFirstDraw = callback;
-    }
-
-    /** How long the first frame took, shown small on the legend row. */
-    public void setStartupMs(long ms) {
-        startupMs = ms;
-        invalidate();
     }
 
     /**
@@ -335,24 +319,13 @@ public final class PanelView extends View {
     }
 
     /**
-     * The numbers behind the last verdict, refreshed on every frame.
+     * That the session log is not being written.
      *
-     * <p>Deliberately a second line. The first version of this reused the evidence line, which only
-     * ever holds its first message — so the moment the modifier failed, every later number was
-     * discarded and the user could not see what the app was judging frames by.
+     * <p>One line, and only when it is true: a run nobody is recording is something the user has to know
+     * before the run, not after it.
      */
-    public void setNumbers(String message) {
-        numbers = message == null ? "" : message;
-        invalidate();
-    }
-
-    /**
-     * Where the app can see the camera's files, and how many are under each root it found. On a body
-     * whose files live somewhere other than where this app may write, this line is the only way to
-     * find that out from the camera itself.
-     */
-    public void setRoots(String message) {
-        roots = message == null ? "" : message;
+    public void setLogNote(String message) {
+        logNote = message == null ? "" : message;
         invalidate();
     }
 
@@ -708,8 +681,7 @@ public final class PanelView extends View {
         int lines = 0;
         if (fontError.length() > 0) lines += wrappedLines(fontError, width, 2);
         if (evidence.length() > 0) lines += wrappedLines(evidence, width, 3);
-        if (numbers.length() > 0) lines += wrappedLines(numbers, width, 2);
-        if (roots.length() > 0) lines += wrappedLines(roots, width, 2);
+        if (logNote.length() > 0) lines += wrappedLines(logNote, width, 2);
         return Math.max(1, lines);
     }
 
@@ -732,9 +704,8 @@ public final class PanelView extends View {
         // used to be against the left edge of the screen alone, and once the legend grew the font note was
         // drawn straight through it — photographed, twice, from the camera.
         float legendEnd = padding + Math.min(paint.measureText(legend), w - padding * 2f);
-        String note = fontNote;
-        if (startupMs > 0) note = note + "  " + startupMs + "ms";
-        float noteWidth = note.length() == 0 ? 0f : paint.measureText(note);
+        String note = "";
+        float noteWidth = 0f;
         // The dirty marker shares this row too, so it is measured before the decision.
         float markWidth = engine.plan().dirty() ? paint.measureText("\u672a\u5b58") + padding * 2f : 0f;  // 未存
         boolean noteInline = note.length() > 0
@@ -767,13 +738,9 @@ public final class PanelView extends View {
             lines += wrap(canvas, evidence, padding, y - lineHeight * lines, wrapWidth, 3);
             paint.setColor(colDim);
         }
-        if (numbers.length() > 0 && fits(y, lineHeight, lines + 1, limit)) {
-            paint.setColor(colDim);
-            lines += wrap(canvas, numbers, padding, y - lineHeight * lines, wrapWidth, 2);
-        }
-        if (roots.length() > 0 && fits(y, lineHeight, lines + 1, limit)) {
-            paint.setColor(colDim);
-            wrap(canvas, roots, padding, y - lineHeight * lines, wrapWidth, 2);
+        if (logNote.length() > 0 && fits(y, lineHeight, lines + 1, limit)) {
+            paint.setColor(colWarn);
+            wrap(canvas, logNote, padding, y - lineHeight * lines, wrapWidth, 2);
         }
 
         // Two markers share this row, so they are laid out from the right edge inwards rather than

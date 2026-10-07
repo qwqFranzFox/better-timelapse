@@ -1,0 +1,187 @@
+package com.voxivoid.bettertimelapse;
+
+import java.util.Locale;
+
+/**
+ * The lines of the session log, as text and nothing else.
+ *
+ * <p>The format is the one docs/PLAN.md §5.2 promised: one appended line per event, {@code key=value},
+ * readable by a person and by a script, with the frame's own moment measured from the start of the run on
+ * the monotonic clock. What is new here are the facts this app now knows that the plan could only hope for:
+ * the exposure the body is set to, whether it takes a dark frame afterwards, how late each press was, which
+ * window it was given, whether the card answered for it, and how long the card took to answer.
+ *
+ * <p>The screen is for the person standing at the camera; this is for whoever reads the run afterwards —
+ * including the case the plan calls M7 and nobody has evidence for: a shoot that dies at hour three. A line
+ * per frame costs a few hundred kilobytes a night and is the difference between "it stopped somewhere" and
+ * "it stopped at frame 2141, eleven milliseconds late, with the card answering in 900 ms".
+ *
+ * <p>No {@code android.*} import: {@code tools/test.sh} compiles this without {@code android.jar}, so the
+ * format is checked off the camera like every other decision in this project.
+ */
+public final class LogLines {
+
+    private LogLines() {}
+
+    /** The version of this format, so a later reader can tell what it is looking at. */
+    public static final int SCHEMA = 1;
+
+    public static String header() {
+        return "# better-timelapse session";
+    }
+
+    public static String schema() {
+        return "schema=" + SCHEMA;
+    }
+
+    /** What the body is and how long its frames are, before anything is shot. */
+    public static String body(String model, String platform, long exposureMs, boolean longExposureNr,
+            long occupancyMs, long shortestIntervalMs) {
+        StringBuilder b = new StringBuilder("body");
+        b.append(" model=").append(text(model, "?"));
+        b.append(" platform=").append(text(platform, "?"));
+        b.append(" exposure=").append(ms(exposureMs));
+        b.append(" nr=").append(longExposureNr ? "on" : "off");
+        b.append(" occupancy=").append(ms(occupancyMs));
+        b.append(" shortest=").append(ms(shortestIntervalMs));
+        return b.toString();
+    }
+
+    /** The plan this run is following, as the panel shows it. */
+    public static String plan(Plan plan) {
+        return "plan interval=" + ms(plan.intervalMs())
+                + " frames=" + (plan.frames() == Plan.FRAMES_UNLIMITED ? "unlimited"
+                        : String.valueOf(plan.frames()))
+                + " delay=" + ms(plan.delayMs())
+                + " settle=" + ms(plan.settleMs())
+                + " drive=" + Plan.driveWire(plan.driveMode())
+                + " silent=" + onOff(plan.silentShutter())
+                + " ael=" + onOff(plan.autoExposureLock())
+                + " paneloff=" + onOff(plan.panelOff());
+    }
+
+    /** Where the run is writing and what the camera looked like when it started. */
+    public static String start(String root, int cardCount, long freeBytes, int batteryPercent) {
+        return "start dir=" + text(root, "?")
+                + " count=" + count(cardCount)
+                + " free=" + bytes(freeBytes)
+                + " bat=" + percent(batteryPercent);
+    }
+
+    /**
+     * One frame, at the moment the shutter was pressed.
+     *
+     * @param lateMs how far past its own moment the frame was started: the number the timetable is judged by.
+     * @param windowMs how long the shutter was held; {@code >= exposure} when the exposure was readable.
+     * @param callbackMs the body's own shutter callback, or {@link Frames#UNKNOWN} when none came.
+     */
+    public static String shot(int index, long atMs, long lateMs, long windowMs, long callbackMs) {
+        return "shot " + index
+                + " at=" + rel(atMs)
+                + " late=" + ms(lateMs)
+                + " window=" + ms(windowMs)
+                + " cb=" + (callbackMs == Frames.UNKNOWN ? "-" : "+" + ms(callbackMs));
+    }
+
+    /** What the card said about a frame, once it had been read. */
+    public static String verdict(int index, int cardCount, int gained, boolean confirmed, long walkMs) {
+        return "verdict " + index
+                + " card=" + count(cardCount)
+                + " gain=" + gained
+                + " result=" + (confirmed ? "ok" : "unverified")
+                + " walk=" + ms(walkMs);
+    }
+
+    /** A moment that went by with no frame in it, because the camera was not free in time. */
+    public static String skip(int index, long atMs, long lateMs, long intervalMs) {
+        return "skip " + index + " at=" + rel(atMs) + " late=" + ms(lateMs) + " interval=" + ms(intervalMs);
+    }
+
+    /** A press the camera refused, and what that proved about how long its frames take. */
+    public static String refused(int index, long atMs, int attempt, long busyAtLeastMs, String error) {
+        return "refused " + index + " at=" + rel(atMs) + " attempt=" + attempt
+                + " busy>=" + ms(busyAtLeastMs)
+                + " err=" + text(error, "?");
+    }
+
+    /** A run that ended because retries ran out. */
+    public static String fault(String cause, int landed, int skipped, String detail) {
+        return "fault cause=" + text(cause, "?") + " landed=" + landed + " skipped=" + skipped
+                + " detail=" + text(detail, "-");
+    }
+
+    /** The end of a run, however it ended. */
+    public static String end(String outcome, int landed, int accounted, int skipped, int unverified) {
+        return "END outcome=" + text(outcome, "?") + " landed=" + landed + " verified=" + accounted
+                + " skipped=" + skipped + " unverified=" + unverified;
+    }
+
+    /** Why a run stopped, in the words a log is read in. */
+    public static String faultName(int fault) {
+        switch (fault) {
+            case Engine.FAULT_CAMERA: return "camera";
+            case Engine.FAULT_CARD: return "card";
+            case Engine.FAULT_WRITE: return "write";
+            case Engine.FAULT_ABORTED: return "aborted";
+            case Engine.FAULT_SHUTTER: return "shutter";
+            default: return "none";
+        }
+    }
+
+    public static String pause(long atMs, String reason, int batteryPercent) {
+        return "pause at=" + rel(atMs) + " reason=" + text(reason, "?") + " bat=" + percent(batteryPercent);
+    }
+
+    public static String resume(long atMs) {
+        return "resume at=" + rel(atMs);
+    }
+
+    /** The frames the card never answered for, said in the file the way the panel says it on screen. */
+    public static String shortfall(int taken, int accounted) {
+        return "shortfall taken=" + taken + " accounted=" + accounted;
+    }
+
+    /** Something the app could not do, recorded so that it is not only on a screen nobody photographed. */
+    public static String problem(String what, String detail) {
+        return "problem what=" + text(what, "?") + " detail=" + text(detail, "-");
+    }
+
+    // ---------------------------------------------------------------- formatting
+
+    /** A moment in the run, as {@code +12.345s}: seconds with milliseconds, which is the scale in question. */
+    public static String rel(long ms) {
+        if (ms == Frames.UNKNOWN) return "?";
+        long whole = ms / 1000;
+        long millis = Math.abs(ms % 1000);
+        return String.format(Locale.US, "%s%d.%03ds", ms < 0 ? "-" : "+", Math.abs(whole), millis);
+    }
+
+    /** A duration in milliseconds, or {@code ?} when the platform would not say. */
+    public static String ms(long ms) {
+        return ms == Frames.UNKNOWN ? "?" : ms + "ms";
+    }
+
+    public static String count(int count) {
+        return count == Frames.UNKNOWN ? "?" : String.valueOf(count);
+    }
+
+    public static String percent(int percent) {
+        return percent < 0 ? "?" : percent + "%";
+    }
+
+    /** Free space, in whole megabytes: the unit a card's room is actually talked about in. */
+    public static String bytes(long bytes) {
+        if (bytes < 0) return "?";
+        return (bytes / (1024L * 1024L)) + "MB";
+    }
+
+    private static String onOff(boolean on) {
+        return on ? "on" : "off";
+    }
+
+    /** A value that must not be able to break the line it is on: a log is read by scripts too. */
+    public static String text(String value, String fallback) {
+        if (value == null || value.length() == 0) return fallback;
+        return value.replace(' ', '_').replace('\n', '_').replace('\r', '_');
+    }
+}

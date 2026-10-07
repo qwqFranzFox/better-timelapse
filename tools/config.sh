@@ -38,4 +38,5 @@ UNITS=(
     Frames
     BodyCycle
     CardNames
+    LogLines
 )

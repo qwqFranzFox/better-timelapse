@@ -110,6 +110,10 @@ public final class Engine {
      */
     private int skipped;
 
+    /** The moment that was skipped, and how late it was when it went by: for the session log. */
+    private int lastSkipIndex = -1;
+    private long lastSkipLateMs;
+
     public Engine(Plan plan) {
         this.plan = plan;
     }
@@ -297,6 +301,8 @@ public final class Engine {
             // and the frame after it is taken where it was always due, rather than sliding the rest of
             // the run behind a camera that could not keep up.
             skipped++;
+            lastSkipIndex = schedule.frameIndex();
+            lastSkipLateMs = -remaining;
             return advanceMoment();
         }
         state = EXPOSING;
@@ -373,6 +379,16 @@ public final class Engine {
     /** Moments the run went past without a frame, because the camera was not free in time. */
     public int skipped() {
         return skipped;
+    }
+
+    /** The last moment that was skipped, counted from zero, or -1. */
+    public int lastSkipIndex() {
+        return lastSkipIndex;
+    }
+
+    /** How far past its own moment that frame was when it was given up on. */
+    public long lastSkipLateMs() {
+        return lastSkipLateMs;
     }
 
     /**

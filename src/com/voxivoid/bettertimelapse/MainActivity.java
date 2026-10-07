@@ -98,6 +98,17 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** How many times the device dump has been attempted this launch. */
     private int dumpAttempts;
 
+    /** The press window the current frame was given, and the body's callback for it, for the log. */
+    private long pressWindowUsedMs;
+    private long lastCallbackMs = Frames.UNKNOWN;
+
+    /** When the current run started, on the monotonic clock: every {@code at=} in the log is relative to it. */
+    private long runStartMs;
+
+    /** How much of the run's own history the log has already been told. */
+    private int loggedSkipped;
+    private int loggedState = Engine.IDLE;
+
     /** Whether this app is the one holding the exposure lock. AEL cannot be read back, so it is tracked. */
     private boolean aelLockedByUs;
 
@@ -179,6 +190,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** A font failure found before the panel existed; shown as soon as there is one. */
     private String pendingFontError = "";
 
+    /** How long the first frame took to draw, for the log's first lines. */
+    private long startupMs;
+
     // ================================================================ lifecycle
 
     @Override
@@ -219,10 +233,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         });
         setContentView(root);
         if (pendingFontError.length() > 0) {
-            panel.setFontNote("\u5b57\u4f53\u672a\u52a0\u8f7d");                            // 字体未加载
+            // A font failure is the one boot diagnostic that stays on the screen: every label is a box until
+            // it is fixed, and the user cannot read anything else to find out why.
             panel.setFontError(pendingFontError);
-        } else {
-            panel.setFontNote("\u5b57\u4f53 " + UiFont.route());                                // 字体 <路径>
         }
         begunAtMs = now();
     }
@@ -259,6 +272,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             if (runInterrupted) {
                 runInterrupted = false;
                 int got = engine.landed();
+                log(LogLines.fault("interrupted", got, engine.skipped(), "app_paused"));
                 engine.stop(Engine.FAULT_NONE, now());
                 panel.setEvidence("\u88ab\u6253\u65ad\uff1a\u5df2\u62cd " + got + " \u5f20");  // 被打断：已拍 N 张
             }
@@ -312,7 +326,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private void onFirstFrame() {
         if (firstFrameDrawn) return;
         firstFrameDrawn = true;
-        panel.setStartupMs(now() - begunAtMs);
+        startupMs = now() - begunAtMs;
         handler.post(onStartup);
     }
 
@@ -365,13 +379,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      *
      * <p>A write that fails is reported on the panel: a diagnostic file nobody can find is worse than none.
      */
-    /** The exposure, as the panel says it: {@code 曝光 4s} or {@code 曝光 4s+NR}. */
-    private String exposureNote() {
-        if (exposureMs <= 0) return "";
-        return "  \u66dd\u5149 " + Steps.shortMs((int) exposureMs)                              // 曝光 <n>
-                + (longExposureNr ? "+NR" : "");
-    }
-
     private void writeDeviceDump() {
         dumpAttempts++;
         String written = DevDump.write(this, deviceReport());
@@ -382,7 +389,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // this data leaves the camera.
             panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5199\u4e0d\u8fdb\u53bb\uff1a"      // 设备清单写不进去：
                     + DevDump.attempts() + "  " + DevDump.probe(this));
-            panel.setRoots("曝光键 " + camera.exposureReport());
         } else if (!DevDump.onCard()) {
             // It landed in private storage, which on this camera cannot be retrieved at all: no adb, and
             // pmca-console has no command that pulls an app's files. So the panel carries both halves of what
@@ -390,10 +396,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // question it was written for.
             panel.setEvidence("\u5361\u4e0a\u5199\u4e0d\u8fdb\uff08" + DevDump.attempts()      // 卡上写不进（
                     + "\uff09  " + DevDump.probe(this));                                      // ）
-            panel.setRoots("曝光键 " + camera.exposureReport());
         } else {
-            panel.setCameraNote(camera.capabilities().summary(camera.previewing())
-                    + exposureNote() + "  \u6e05\u5355 " + written);                          // 清单 <路径>
+            // Success is quiet on the screen: the path is in the log, and the file is on the card where the
+            // reader can be pointed at it.
+            log("dump path=" + written);
         }
     }
 
@@ -459,6 +465,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         writeDeviceDump();
     }
 
+    /** How much of the session log the panel's reader shows. */
+    private static final int LOG_TAIL_LINES = 80;
+
     /** How many times the device dump is tried when the card will not take it. */
     private static final int DUMP_ATTEMPTS_MAX = 4;
 
@@ -500,7 +509,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             return;
         }
         camera.setShutterListener(onShutter);
-        panel.setCameraNote(camera.capabilities().summary(camera.previewing()));
+        log("camera " + camera.capabilities().summary(camera.previewing()).replace(' ', '_'));
         // A different exposure, image quality or card changes what the body needs, and the measurement
         // belongs to the body's state rather than to the app.
         body.reset();
@@ -566,8 +575,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         }
 
         // What the body actually holds, read back after the writes above: the difference between "the
-        // setting was applied" and "the setting was sent".
-        panel.setNumbers(camera.settingsReport());
+        // setting was applied" and "the setting was sent". A file fact now, not a screen line.
+        log("settings " + camera.settingsReport().replace(' ', '_'));
 
         String problem = camera.modifierProblem();
         if (problem.length() > 0) {
@@ -617,6 +626,36 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     // ================================================================ the loop
 
     /**
+     * The header of a run, in the log.
+     *
+     * <p>Written before the first frame so that a run which dies half way is still identifiable: what the body
+     * said its frames cost, what the plan asked for, and what the camera looked like at the start. Everything
+     * after it is one line per event, appended, so the last line of a file that ends abruptly is the last
+     * thing that happened.
+     */
+    private void logRunStart() {
+        Plan plan = engine.plan();
+        Session.open(this, LogLines.header());
+        log(LogLines.schema());
+        log(LogLines.body(SonyCamera.property("model.name"), SonyCamera.property("version.platform"),
+                exposureMs, longExposureNr, occupancyMs(),
+                Math.max(body.shortestIntervalMs(plan),
+                        Frames.shortestIntervalMs(plan, exposureMs, longExposureNr))));
+        log(LogLines.plan(plan));
+        log(LogLines.start(cardRoot, cardCount, Device.freeBytes(
+                cardRoot.length() == 0 ? null : cardRoot), Device.batteryPercent(this)));
+        log("boot firstframe=" + LogLines.ms(startupMs) + " font=" + LogLines.text(UiFont.route(), "?"));
+        log("paths log=" + LogLines.text(Session.path(), "-")
+                + " dump=" + LogLines.text(DevDump.written(), "-")
+                + " carddump=" + (DevDump.onCard() ? "yes" : "no"));
+        if (Session.broken()) {
+            // The one thing about the log the user has to know while standing at the camera.
+            panel.setLogNote("\u65e5\u5fd7\u5199\u4e0d\u8fdb\uff1a"                     // 日志写不进：
+                    + LogLines.text(Session.problem(), "?"));
+        }
+    }
+
+    /**
      * Say so, before the run starts, when the plan asks for more than the camera can do.
      *
      * <p>The interval is a promise about the clock, and the shutter itself takes time: the press and the
@@ -658,6 +697,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void pump() {
         int action = engine.step(Engine.EV_TICK, now());
+        logTransitions();
         switch (action) {
             case Engine.ACT_ARM_TIMER:
                 armTimer();
@@ -688,6 +728,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         if (!Hud.worthSaying(taken, accounted)) return;
         shortfallSaid = true;
         panel.setEvidence(Hud.shortfallLine(taken, accounted));
+        log(LogLines.shortfall(taken, accounted));
     }
 
     /** Post the timer for the moment the next frame is due, cancelling whatever was pending. */
@@ -742,6 +783,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             long refusedAtMs = now();
             body.refused(refusedAtMs);
             String why = camera.lastError();
+            if (fireAttempts == 0) {
+                log(LogLines.refused(engine.fired(), runStartMs(), 1, body.lowerBoundMs(), why));
+            }
             panel.setEvidence(body.known()
                     ? "\u5feb\u95e8\u88ab\u62d2\uff1a\u6bcf\u5f20\u81f3\u5c11 "                                  // 快门被拒：每张至少
                             + Steps.shortMs((int) body.lowerBoundMs()) + "\uff0c\u95f4\u9694\u592a\u77ed"     // N，间隔太短
@@ -777,8 +821,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         handler.removeCallbacks(onRelease);
         // The longer of the two signals: what the body says its exposure is, and how long its own callback
         // has taken when it sends one. Releasing before the exposure ends risks cutting the frame off.
-        handler.postDelayed(onRelease,
-                Frames.pressWindowMs(engine.plan(), Math.max(exposureMs, callbackHintMs)));
+        pressWindowUsedMs = Frames.pressWindowMs(engine.plan(), Math.max(exposureMs, callbackHintMs));
+        handler.postDelayed(onRelease, pressWindowUsedMs);
     }
 
     /**
@@ -833,6 +877,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             callbacks++;
             if (firedAtMs > 0) {
                 long took = now() - firedAtMs;
+                lastCallbackMs = took;
                 callbackMsTotal += took;
                 // The longest one seen, not the mean: a callback that arrives after ten seconds is the body
                 // saying its exposure took ten seconds, and the release has to wait for that.
@@ -848,6 +893,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * next cannot make the following frame late.
      */
     private void frameTaken() {
+        int index = engine.fired();
+        log(LogLines.shot(index, now() - runStartMs(), now() - firedAtMs - pressWindowUsedMs,
+                pressWindowUsedMs, lastCallbackMs));
         // Taken, and not yet accounted for on the card. This is the state every frame starts in: the
         // count that proves it is written comes back from the worker thread a good part of an interval
         // from now, because a file that is written after the shutter is not there the instant the
@@ -911,12 +959,13 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 // Readable and then not: retrying cannot help, and the frames from here on have no
                 // witness at all. This is the one card condition that stops a run (docs/DECISIONS.md
                 // A18).
+                log(LogLines.fault("card", engine.landed(), engine.skipped(), "unreadable"));
                 engine.stop(Engine.FAULT_CARD, now());
                 panel.setEvidence("\u5b58\u50a8\u5361\u8bfb\u4e0d\u5230\u4e86");              // 存储卡读不到了
             }
             accountForFrames();
             if (lastGained > 0) engine.setLastFile(cardNewest);
-            pushCardLines();
+            logCard();
             retryDeviceDump();
             panel.invalidate();
         }
@@ -943,28 +992,30 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         int open = engine.unverified();
         if (accounted > open) accounted = open;
         for (int i = 0; i < accounted; i++) engine.accountFor();
+        if (engine.landed() > 0) {
+            log(LogLines.verdict(engine.fired(), cardCount, gained, accounted > 0, walkMs));
+        }
     }
 
-    /** The card's own lines: where it was read, what it holds, and what it just did. */
-    private void pushCardLines() {
-        // While the card is being read, the root's path is the useful fact; the per-root counts were a
-        // startup diagnostic and they are only recomputed when the root changes, so leaving them on screen
-        // put a stale number next to the live one on the line below (photographed: 648 beside 654). The
-        // full enumeration comes back exactly when it is the answer — a card this app cannot read at all.
-        String where = cardCount == Frames.UNKNOWN && cardRoots.length() > 0 ? cardRoots : cardRoot;
-        panel.setRoots("\u5361\u6839 " + (where.length() == 0 ? "\u65e0" : where)         // 卡根 / 无
-                + "  " + newestLine());
-        panel.setNumbers("\u5361\u589e " + lastGained + " \u6587\u4ef6"                     // 卡增
-                + "  \u6838\u5b9e " + confirmed()                                           // 核实
-                + "  \u843d\u76d8 " + engine.landed()                                       // 落盘
-                + "  \u672a\u6838\u5b9e " + engine.unverified()                             // 未核实
-                + "  \u5361 " + (cardCount == Frames.UNKNOWN ? "?" : String.valueOf(cardCount))
-                + "  \u8bfb\u6570 " + walkMs + "ms"                                         // 读数
-                + "  \u56de\u6267 " + callbacks + "/" + engine.landed()                      // 回执
-                + (callbacks > 0 ? " +" + (callbackMsTotal / callbacks) + "ms" : "")
-                + (body.known()                                                             // 机身
-                        ? "  \u673a\u8eab >" + Steps.shortMs((int) body.lowerBoundMs())
-                        : ""));
+    /**
+     * What the card did, to the log.
+     *
+     * <p>This was five lines of small text at the bottom of the screen: the root, the newest file and its
+     * age, the count, what the walk cost, which frames the card had answered for, how many callbacks the body
+     * sent. Every one of those numbers was worth having while they were being hunted down, and every one of
+     * them belongs in a file that a reader can be run over rather than in the corner of a screen the user is
+     * standing in front of. What the screen keeps is the progress line, which already says 核实 and 未核实 and
+     * 跳过 in the place those numbers are actually about.
+     */
+    private void logCard() {
+        Session.line(this, "card root=" + LogLines.text(cardRoot, "?")
+                + " count=" + LogLines.count(cardCount)
+                + " newest=" + LogLines.text(cardNewest, "-")
+                + " gained=" + lastGained
+                + " walk=" + LogLines.ms(walkMs)
+                + " callbacks=" + callbacks + "/" + engine.landed()
+                + (callbacks > 0 ? " cb=" + LogLines.ms(callbackMsTotal / callbacks) : "")
+                + " measured=" + LogLines.ms(body.lowerBoundMs()));
     }
 
     /** Frames the card has answered for: taken, and no longer outstanding. */
@@ -1042,6 +1093,49 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** How long one frame occupies the body: the exposure, doubled when it takes a dark frame too. */
     private long occupancyMs() {
         return Frames.occupancyMs(exposureMs, longExposureNr);
+    }
+
+    /**
+     * The things the engine decided on its own, into the log: moments it skipped, and the end of the run.
+     *
+     * <p>These happen inside the engine rather than in answer to a key, so the shell only learns about them by
+     * looking — and a run whose log says nothing about the eleven moments it skipped is a run whose holes
+     * cannot be explained afterwards.
+     */
+    private void logTransitions() {
+        while (loggedSkipped < engine.skipped()) {
+            loggedSkipped++;
+            log(LogLines.skip(engine.lastSkipIndex(), runStartMs(), engine.lastSkipLateMs(),
+                    engine.plan().intervalMs()));
+        }
+        int state = engine.state();
+        if (state == loggedState) return;
+        if (state == Engine.FAULT) {
+            log(LogLines.fault(LogLines.faultName(engine.fault()), engine.landed(), engine.skipped(),
+                    engine.lastLoss().length() > 0 ? engine.lastLoss() : engine.faultText()));
+        } else if (state == Engine.DONE) {
+            log(LogLines.end("done", engine.landed(), confirmed(), engine.skipped(), engine.unverified()));
+        }
+        loggedState = state;
+    }
+
+    /**
+     * One line to the session log on the card.
+     *
+     * <p>The screen shows the run; the file shows the machine. Everything that used to be printed in small
+     * dim text at the bottom of the panel — the card's counts, the walk's cost, the callbacks, the keys, the
+     * font route, the startup time — goes here instead, where it is read as a file and not photographed.
+     *
+     * <p>Never between a frame's due moment and its shutter: the timing budget is the whole point of the rest
+     * of this class, and a log write is I/O like any other.
+     */
+    private void log(String line) {
+        Session.line(this, line);
+    }
+
+    /** Milliseconds since the current run started, for the log's {@code at=} fields. */
+    private long runStartMs() {
+        return runStartMs == 0 ? 0 : now() - runStartMs;
     }
 
     private long now() {
@@ -1168,6 +1262,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         retryDeviceDump();
                         refreshExposure();
                         applyPlanToCamera();
+                        runStartMs = now();
+                        loggedSkipped = 0;
+                        loggedState = Engine.IDLE;
+                        logRunStart();
                         warnIfImpossible();
                     }
                     engine.step(Engine.EV_ENTER, now());
@@ -1180,7 +1278,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 handler.removeCallbacks(onTrashHold);
                 if (trash.up() == Keys.Hold.SHORT) {
                     panel.trash(now());
-                    if (engine.state() == Engine.PAUSED) walkCard();
+                    if (engine.state() == Engine.PAUSED) {
+                        log(LogLines.pause(runStartMs(), "trash", Device.batteryPercent(this)));
+                        walkCard();
+                    } else if (engine.midRun()) {
+                        log(LogLines.resume(runStartMs()));
+                    }
                 }
                 return true;
             case Keys.K_MENU:
@@ -1292,6 +1395,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 return;
             }
             if (!engine.midRun()) return;
+            log(LogLines.fault("aborted", engine.landed(), engine.skipped(), "hold_trash"));
             engine.stop(Engine.FAULT_ABORTED, now());
             handler.removeCallbacks(onTick);
             handler.removeCallbacks(onRelease);
@@ -1314,7 +1418,15 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         @Override
         public void run() {
             if (menu.fire() != Keys.Hold.HOLD) return;
-            if (!engine.midRun()) panel.showText(deviceReport());
+            if (!engine.midRun()) {
+                // The device report, and the run so far: the two things worth several screens, and the only
+                // way to read either of them on a camera that will not let a computer at its app's files.
+                String tail = Session.tail(LOG_TAIL_LINES);
+                panel.showText(deviceReport()
+                        + "\n\n[the session log, last " + LOG_TAIL_LINES + " lines]\n"
+                        + LogLines.text(Session.path(), "(no log)") + "\n"
+                        + (tail.length() == 0 ? "(nothing written yet)" : tail));
+            }
         }
     };
 }

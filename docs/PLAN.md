@@ -333,6 +333,8 @@ fault at=+423.100s cause=card_full frames_landed=214
 END at=+423.100s outcome=fault
 ```
 
+> **已实现**（`Session` + `LogLines`，v0.1.0-dev.g… 起）。实际写出的字段比上面多一些，都是这台机身现在能提供的事实：`body` 行带 `exposure=` / `nr=` / `occupancy=` / `shortest=`（曝光与长曝降噪，A34），`shot` 行带 `late=` / `window=` / `cb=`，`verdict` 行带 `card=` / `gain=` / `result=` / `walk=`，另有 `skip` / `refused`（含 `busy>=`）/ `shortfall` / `problem` 行与小节 `END`。文件在卡上 `BTLPSE/LOG.TXT`（8.3 名字，A33），超过 512KB 轮转为 `LOG.OLD`。
+
 每行都是**追加**写，所以断电最多丢最后一行。恢复时读最后一行判断结果。`shot` 行的 `at` 是相对 `start` 的毫秒数（单调时钟），`wrote` 是从快门到文件出现的实测耗时 —— 这个数据同时也是「间隔该设多大」的现场依据。`bat`/`temp` 是每帧的电量与温度（若平台给得出），因为**热与电的行为没有人替我们测过**，只能自己记录（见 §6 的 M7 注）。
 
 ### 5.3 隐私与权限
