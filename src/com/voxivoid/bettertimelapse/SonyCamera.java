@@ -656,25 +656,40 @@ public final class SonyCamera {
             if (flat == null) return "(no parameters)";
             String[] lines = flat.split(";");
             StringBuilder b = new StringBuilder();
+            int matched = 0;
             for (int i = 0; i < lines.length; i++) {
                 String line = lines[i];
                 int eq = line.indexOf('=');
                 String key = eq > 0 ? line.substring(0, eq) : line;
                 String lower = key.toLowerCase(java.util.Locale.US);
-                // The ones a time-lapse could need, plus anything Sony-flavoured.
-                if (lower.indexOf("silent") >= 0 || lower.indexOf("drive") >= 0
-                        || lower.indexOf("burst") >= 0 || lower.indexOf("bracket") >= 0
-                        || lower.indexOf("shutter") >= 0 || lower.indexOf("focus") >= 0
-                        || lower.indexOf("review") >= 0) {
+                if (interestingKey(lower)) {
                     b.append(key).append(' ');
+                    matched++;
                 }
             }
-            return b.length() == 0 ? "(no matching keys of " + lines.length + ")" : b.toString();
+            // How many keys there are in total, not only how many matched: it says whether reading the whole
+            // list off the screen is a page or a book, which is what decides how the next question gets asked.
+            return "(" + lines.length + " keys, " + matched + ") " + (b.length() == 0 ? "" : b.toString()).trim();
         } catch (Throwable t) {
             return "(flatten failed: " + shortName(t) + ")";
         }
     }
 
+    /**
+     * Whether a parameter key could carry something this app needs to know.
+     *
+     * <p>The list is the whole answer to "what will this body tell us": {@code exposure} was missing from it
+     * for two builds, which is how the one question the device dump exists for — can the shutter speed be
+     * read — went unanswered while the panel was showing a filtered list that could not contain it.
+     */
+    private static boolean interestingKey(String lower) {
+        String[] wanted = { "shutter", "exposure", "speed", "iso", "aperture", "fnumber", "f-number",
+                "silent", "drive", "burst", "bracket", "focus", "review" };
+        for (int i = 0; i < wanted.length; i++) {
+            if (lower.indexOf(wanted[i]) >= 0) return true;
+        }
+        return false;
+    }
 
     /** Ask the body what it supports, once. Every answer is allowed to be unknown. */
     public Capabilities capabilities() {

@@ -397,8 +397,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                     + DevDump.attempts());
             panel.setRoots("\u53c2\u6570\u952e " + camera.parameterKeys());                  // 参数键
         } else if (!DevDump.onCard()) {
-            panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5728\u673a\u8eab\u5185\u90e8\uff08\u53d6\u4e0d\u51fa\uff09\uff1a"  // 设备清单在机身内部（取不出）：
-                    + camera.parameterKeys());
+            // It landed in private storage, which on this camera cannot be retrieved at all: no adb, and
+            // pmca-console has no command that pulls an app's files. So the panel carries both halves of what
+            // the file was for — why every place on the card refused it, and the keys that could answer the
+            // question it was written for.
+            panel.setEvidence("\u5361\u4e0a\u5199\u4e0d\u8fdb\uff08" + DevDump.attempts()      // 卡上写不进（
+                    + "\uff09  \u53c2\u6570\u952e " + camera.parameterKeys());              // ）  参数键
         } else {
             panel.setCameraNote(camera.capabilities().summary(camera.previewing())
                     + "  \u6e05\u5355 " + written);                                          // 清单 <路径>
