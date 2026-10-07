@@ -305,6 +305,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         handler.removeCallbacks(onRetryFire);
         handler.removeCallbacks(onVerdict);
         handler.removeCallbacks(onDevice);
+        handler.removeCallbacks(onTickRedraw);
         // The panel comes back on the way out, always. The camera's screen belongs to whoever is holding it
         // next, and an app that leaves it dark — with no key of its own left to press — has handed the user a
         // camera that looks broken. This happens even when a run is being interrupted, where the wake is the
@@ -1438,6 +1439,30 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         }
     };
 
+    /**
+     * The panel's own heartbeat, for the things on it that are about the clock.
+     *
+     * <p>Everything on the panel used to change only when something happened -- a frame, a key, a card walk --
+     * and for a status line of text that was right. A countdown is not text: a number of seconds remaining is a
+     * claim about now, and a claim about now drawn only every five seconds is wrong for four of them. The user
+     * saw exactly that: the bar and the number disagreed with the clock, because both were a snapshot taken up
+     * to five seconds earlier.
+     *
+     * <p>So while a run is on, and only then, the panel is redrawn four times a second. The work is one canvas
+     * redraw of a screen with a handful of text on it; what it buys is that the two things on that screen which
+     * describe time describe it now.
+     */
+    private static final long TICK_MS = 250;
+
+    private final Runnable onTickRedraw = new Runnable() {
+        @Override
+        public void run() {
+            if (!engine.midRun()) return;
+            panel.invalidate();
+            handler.postDelayed(this, TICK_MS);
+        }
+    };
+
     private void pushDeviceStatus() {
         // Battery and card space are platform calls and always safe; the camera is not always safe to ask.
         if (quietMoment()) refreshExposure();
@@ -1737,6 +1762,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         // seconds after the run it belongs to makes the first frame's `late=` a 2.5-second lie
                         // and hands the countdown that much less time. See docs/DECISIONS.md A39.
                         runStartMs = now();
+                        handler.removeCallbacks(onTickRedraw);
+                        handler.postDelayed(onTickRedraw, TICK_MS);
                         engine.step(Engine.EV_ENTER, runStartMs);
                         // Arm the first frame's timer now, too: the work below is file I/O, and with a plan
                         // whose delay is zero the first moment is due at once.
