@@ -172,6 +172,18 @@ public final class Engine {
         return schedule.elapsedMs(nowMs);
     }
 
+    /**
+     * When the next frame is due, on the same clock as everything else, or {@link Schedule#NONE}.
+     *
+     * <p>Handed out for the one caller that has to act <em>before</em> a frame rather than at it: the panel
+     * comes back on ahead of the moment so the body has a live preview when the shutter is asked for
+     * ({@link Frames#panelWakeAtMs}). Absolute, not a wait: a wake-up computed from "how long is left" would
+     * drift with every late frame, and its whole job is to be early.
+     */
+    public long nextDueMs() {
+        return schedule.nextDueMs(plan);
+    }
+
     public long meanIntervalMs() {
         return Schedule.meanInterval(shotTimesMs, landed);
     }

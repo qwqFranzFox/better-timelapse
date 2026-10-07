@@ -77,6 +77,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private final SonyCamera camera = new SonyCamera();
     private final Card card = new Card();
 
+    /** The camera's display output, for the 关屏 row. The only thing in this app that touches the LCD. */
+    private final Screen screen = new Screen();
+
     private Engine engine;
     private PanelView panel;
 
@@ -306,6 +309,13 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         handler.removeCallbacks(onRetryFire);
         handler.removeCallbacks(onVerdict);
         handler.removeCallbacks(onDevice);
+        // The panel comes back on the way out, always. The camera's screen belongs to whoever is holding it
+        // next, and an app that leaves it dark — with no key of its own left to press — has handed the user a
+        // camera that looks broken. This happens even when a run is being interrupted, where the wake is the
+        // only part of the state that is not about this app.
+        wakePanel();
+        handler.removeCallbacks(onPanelOff);
+        handler.removeCallbacks(onPanelWake);
         // Clear every hold: a release that lands while the app is not looking must not leave a key
         // stuck down, which is the failure that makes a camera app look broken.
         trash.reset();
@@ -441,6 +451,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         b.append(camera.cameraExMethods()).append('\n');
         b.append("\n[parameter modifier methods]\n");
         b.append(camera.modifierMethods()).append('\n');
+        // The display API, asked of the body rather than taken from the old app's source: whether the panel can
+        // be switched off is the only part of the 关屏 row that a camera can answer.
+        b.append("\n[display output, for the panel-off row]\n");
+        b.append(screen.apiReport()).append('\n');
         b.append("\n[the plan in force]\n");
         b.append("interval=").append(plan.intervalMs())
                 .append(" frames=").append(plan.frames())
@@ -518,6 +532,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         }
         camera.setShutterListener(onShutter);
         log("camera " + camera.capabilities().summary(camera.previewing()).replace(' ', '_'));
+        // Whether this body can switch its display output is the one question the 关屏 row cannot answer for
+        // itself, and it is asked here — once, without switching anything — so the row can say so on screen.
+        boolean switchable = screen.supported();
+        panel.setPanelSwitchable(switchable);
+        log("screen display=" + (switchable ? "switchable" : "no")
+                + (screen.problem().length() > 0 ? " problem=" + LogLines.text(screen.problem(), "?") : ""));
         // A different exposure, image quality or card changes what the body needs, and the measurement
         // belongs to the body's state rather than to the app.
         body.reset();
@@ -1006,6 +1026,97 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         pump();
         handler.removeCallbacks(onVerdict);
         handler.postDelayed(onVerdict, Frames.verdictDelayMs(engine.plan()));
+        // The frame is over, so this is the stretch in which the panel has nothing to show. Both of these are
+        // timers, never calls: switching the display output is a platform call with a surface behind it, and
+        // nothing slow may sit between a frame's due moment and its shutter (docs/DECISIONS.md A19).
+        armPanelOff();
+        armPanelWake();
+    }
+
+    // ================================================================ the panel between frames
+
+    /**
+     * Darken the panel for the wait, and bring it back before the next frame.
+     *
+     * <p>Three conditions, and each of them is a reason not to do it rather than a detail: the row has to ask
+     * for it, the body has to be able to switch its display output, and the plan has to leave room for the
+     * switches without eating into the frame (all three in {@link Frames#panelStaysOff}). When any of them is
+     * false the panel simply stays lit, which is what a camera did before this feature existed.
+     */
+    private void armPanelOff() {
+        handler.removeCallbacks(onPanelOff);
+        if (!panelShouldDarken()) return;
+        handler.postDelayed(onPanelOff, Frames.panelOffDelayMs(engine.plan()));
+    }
+
+    /**
+     * Bring the panel back before the next frame's moment.
+     *
+     * <p>Armed against the frame's own due moment and not as a fixed wait, so a frame answered late cannot
+     * push its own wake-up late with it — the failure that matters here is a panel still dark when the shutter
+     * fires. With no next frame there is no deadline, so the panel comes back at once: a finished run must not
+     * leave a black screen and a user who cannot read the count.
+     */
+    private void armPanelWake() {
+        handler.removeCallbacks(onPanelWake);
+        if (!panelShouldDarken()) return;
+        long due = engine.nextDueMs();
+        long wakeAt = Frames.panelWakeAtMs(engine.plan(), now(), due);
+        if (wakeAt == Schedule.NONE) {
+            wakePanel();
+            return;
+        }
+        handler.postDelayed(onPanelWake, Math.max(0, wakeAt - now()));
+    }
+
+    /** Whether the panel may be darkened at all right now. */
+    private boolean panelShouldDarken() {
+        if (!engine.plan().panelOff()) return false;
+        if (engine.state() != Engine.ARMED && engine.state() != Engine.WAITING) return false;
+        if (screen.isOff()) return true;                    // already dark: only the wake matters
+        return screen.supported() && Frames.panelStaysOff(engine.plan());
+    }
+
+    private final Runnable onPanelOff = new Runnable() {
+        @Override
+        public void run() {
+            if (!panelShouldDarken()) return;
+            if (!screen.off()) {
+                // A screen that will not switch off is worth saying once, on the evidence line, with the reason
+                // — and never worth retrying per frame.
+                panel.setEvidence("\u5173\u5c4f\u5931\u8d25\uff1a" + LogLines.text(screen.problem(), "?"));
+                panel.invalidate();
+                return;
+            }
+            log(LogLines.panel("off", screen.working(), screen.problem()));
+        }
+    };
+
+    private final Runnable onPanelWake = new Runnable() {
+        @Override
+        public void run() {
+            wakePanel();
+        }
+    };
+
+    /**
+     * Light the panel again, if this app is the one that darkened it.
+     *
+     * <p>Called from every path that ends the dark window: the frame coming due, a pause, a stop, a fault, a
+     * key the user pressed, and the app going to the background. It is deliberately safe to call when the panel
+     * was never off, because the cost of a redundant switch is nothing and the cost of a missed one is a camera
+     * whose screen is black in the user's hands.
+     */
+    private void wakePanel() {
+        handler.removeCallbacks(onPanelOff);
+        if (!screen.isOff()) return;
+        if (screen.on()) log(LogLines.panel("on", screen.working(), screen.problem()));
+        // The preview is put back deliberately and not left to luck. Switching the display output is a platform
+        // call about the whole screen, and this body will not take a photograph without a live preview stream —
+        // the failure is `BurstableTakePicture failed`, and it would arrive as a frame that could not be taken
+        // rather than as anything mentioning the panel (docs/DECISIONS.md A20). Restarting a preview that never
+        // stopped costs nothing worth measuring.
+        camera.resumePreview();
     }
 
     // ================================================================ the card, off the UI thread
@@ -1409,6 +1520,11 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // them through is how a camera's own menu interrupts a run.
         if (Keys.swallowed(scan)) return true;
 
+        // Any key brings the panel back, before anything is done with it: a user who cannot see the screen
+        // cannot see what their key did, and the next thing they will try is another key. Here rather than in
+        // each branch, so that no key can be missed — including the ones this app ignores on purpose.
+        if (screen.isOff()) wakePanel();
+
         switch (scan) {
             case Keys.K_WHEEL_CW:
             case Keys.K_DIAL_CW:
@@ -1502,6 +1618,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         loggedState = Engine.IDLE;
                         summaryLogged = false;
                         finalWalks = 0;
+                        cardBaseline = cardCount;
+                        // The planning is over and the panel is about to be needed for a whole run: if it was
+                        // dark, this is where it comes back, before the timetable is armed.
+                        wakePanel();
                         // The run's clock and the timetable's origin are the same instant, and both are set
                         // here — before anything slow. They used to be ten lines apart with a log header, a
                         // device dump and a card walk between them, and the session log of a 5-frame run says
@@ -1554,6 +1674,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 if (menu.up() == Keys.Hold.SHORT) {
                     if (engine.midRun()) {
                         engine.stop(Engine.FAULT_NONE, now());
+                        // The run is over, so the panel comes back now rather than on the next frame's wake-up:
+                        // a stopped run whose screen is dark is a camera the user cannot read the count off.
+                        wakePanel();
                         handler.removeCallbacks(onTick);
                         handler.removeCallbacks(onRelease);
                         handler.removeCallbacks(onRetryFire);

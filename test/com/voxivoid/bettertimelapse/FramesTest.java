@@ -223,4 +223,55 @@ class FramesTest {
         assertTrue(Frames.enoughRoom(Frames.UNKNOWN, 300), "a card that will not say is not a refusal");
         assertFalse(Frames.enoughRoom(3, Plan.FRAMES_UNLIMITED), "an endless run needs a real floor");
     }
+
+    @Test
+    void thePanelIsDarkForTheWaitAndLitForTheFrame() {
+        // 5s, this body's default and the interval every measurement in docs/PLATFORM-FACTS.md was taken at.
+        // The panel comes back a quarter of the interval before each frame -- 1250ms, which covers the switch,
+        // the surface re-attach and the preview the body needs before it will take a shutter -- and goes dark a
+        // second after the frame, once the counter has been redrawn. So it is lit for 2.25s of every 5 and dark
+        // for the other 2.75s.
+        Plan plan = plan(5000, 10);
+        assertEquals(1250, Frames.panelLitMs(plan));
+        assertEquals(1000, Frames.panelOffDelayMs(plan));
+        assertTrue(Frames.panelStaysOff(plan));
+
+        // A long interval is where the feature pays: the lit stretch is still a quarter of it, so a one-minute
+        // run has the screen dark for 44 of every 60 seconds.
+        Plan slow = plan(60_000, 10);
+        assertEquals(15_000, Frames.panelLitMs(slow));
+        assertEquals(44_000, slow.intervalMs() - Frames.panelOffDelayMs(slow) - Frames.panelLitMs(slow),
+                "the dark stretch of a one-minute interval");
+    }
+
+    @Test
+    void theShortestIntervalKeepsThePanelLitRatherThanFlashingIt() {
+        // Two switches and a lit stretch have to fit between two frames, and what is left has to be a dark
+        // window and not a flash: an interval that can only manage 300ms of darkness is a screen being blinked,
+        // which draws attention to the camera rather than hiding it.
+        assertFalse(Frames.panelStaysOff(plan(2000, 10)), "300ms of darkness is a flash, not a feature");
+        assertEquals(Schedule.NONE, Frames.panelOffDelayMs(plan(2000, 10)), "nothing to switch off");
+        // Exactly at the floor: 1700 for the lit sides and the switch, plus the 500ms window itself.
+        assertFalse(Frames.panelStaysOff(plan(2199, 10)));
+        assertTrue(Frames.panelStaysOff(plan(2200, 10)), "exactly the floor is still worth switching");
+        // The wake still has an answer everywhere: a plan with no dark stretch is a plan whose panel is simply
+        // on, and the wake is what guarantees that.
+        assertEquals(1300, Frames.panelWakeAtMs(plan(2000, 10), 0, 2000));
+        // This body's own floor -- the shortest interval it will shoot at all -- has room to spare.
+        assertTrue(Frames.panelStaysOff(plan(3700, 10)));
+    }
+
+    @Test
+    void thePanelComesBackBeforeTheFrameAndNotAfterIt() {
+        // The wake is an instant, not a wait: a frame answered 2 seconds late must not push its own wake-up
+        // late with it, because the failure this exists to prevent is a panel still dark when the shutter is
+        // asked for. now=0, frame due at 5000, lit stretch 1250 -> on at 3750.
+        assertEquals(3750, Frames.panelWakeAtMs(plan(5000, 10), 0, 5000));
+        assertEquals(8750, Frames.panelWakeAtMs(plan(5000, 10), 5000, 10_000));
+
+        // Inside the lit window already: wake where we stand rather than in the past.
+        assertEquals(4000, Frames.panelWakeAtMs(plan(5000, 10), 4000, 4700));
+        // No next frame: no deadline, and the caller wakes the panel at once rather than never.
+        assertEquals(Schedule.NONE, Frames.panelWakeAtMs(plan(5000, 10), 0, Schedule.NONE));
+    }
 }

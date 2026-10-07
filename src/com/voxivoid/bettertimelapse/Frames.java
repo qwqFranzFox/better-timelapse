@@ -272,4 +272,105 @@ public final class Frames {
         if (planned == Plan.FRAMES_UNLIMITED) return framesLeft >= MIN_FRAMES_TO_START;
         return framesLeft >= Math.min(planned, MIN_FRAMES_TO_START);
     }
+
+    // ---------------------------------------------------------------- the panel between frames
+    /**
+     * What one switch of the display output costs, allowing for both directions.
+     *
+     * <p>Switching off and switching back on are two platform calls with a surface behind them, and they are
+     * budgeted together because a plan that cannot afford both cannot afford either: the failure mode of
+     * getting this wrong is a panel that is still dark when the shutter fires, which is a lost frame rather
+     * than a dim one.
+     */
+    public static final long PANEL_TRANSITION_MS = 300;
+
+    /**
+     * How long before a frame's own moment the panel has to be back on.
+     *
+     * <p>The panel is not a light bulb with a switch: switching the display output back is a platform call,
+     * and this app has to re-attach its surface and redraw, and — most of all — the body has to have its
+     * preview stream running again before it will accept a shutter. All of that belongs in the quiet stretch
+     * before a frame, never at the frame's own moment, which is the deadline everything else in this class is
+     * arranged around. 700 ms is chosen against the two numbers this body has shown: a settle delay of
+     * 1200 ms and shutter callbacks arriving 259–438 ms after a press. Both constants are first values to be
+     * measured on the camera, not derived ones (docs/DECISIONS.md A42).
+     */
+    public static final long PANEL_WAKE_BEFORE_MS = 700;
+
+    /**
+     * How long after a frame the panel is allowed to go dark.
+     *
+     * <p>The stretch right after a frame is the app's busy one — the counter changes, the log is appended, the
+     * card is read — and it is also the only moment anything on the panel is worth reading, so the switch waits
+     * until it is over. A second is generous against what that work actually costs; it is a value to measure on
+     * the camera like the other two (docs/DECISIONS.md A42).
+     */
+    public static final long PANEL_OFF_AFTER_MS = 1000;
+
+    /**
+     * The shortest dark window worth the switch.
+     *
+     * <p>Without a floor here the arithmetic is happy with a 300 ms window on a two-second interval, which is
+     * not a screen being off: it is a screen being flashed, which draws attention to the camera instead of
+     * hiding it and saves no backlight worth counting. A plan that cannot stay dark for this long keeps its
+     * panel lit, and the row says so.
+     */
+    public static final long PANEL_MIN_DARK_MS = 500;
+
+    /**
+     * Whether this plan can darken the panel at all.
+     *
+     * <p>Two things have to fit between two frames: the stretch after a frame in which the panel stays lit for
+     * the user, and the switch itself. A plan with no room for both does not pay for the feature rather than
+     * flashing the panel once per frame — and the row on screen says which case it is instead of claiming a
+     * setting that does nothing.
+     */
+    public static boolean panelStaysOff(Plan plan) {
+        if (plan.intervalMs() <= PANEL_OFF_AFTER_MS + panelLitMs(plan)) return false;
+        return plan.intervalMs() - PANEL_OFF_AFTER_MS - panelLitMs(plan) >= PANEL_MIN_DARK_MS;
+    }
+
+    /**
+     * How long the panel is lit before each frame — the stretch in which it is worth having a screen at all.
+     *
+     * <p>Not a constant: a run can be asked for five seconds between frames or twenty minutes, and a wake-up a
+     * fixed 700 ms before the shutter would leave the panel lit for 700 ms of a twenty-minute wait. So the lit
+     * stretch is {@link #PANEL_WAKE_BEFORE_MS} or a quarter of the interval, whichever is longer, and the panel
+     * is dark for everything between the two.
+     */
+    public static long panelLitMs(Plan plan) {
+        return Math.max(PANEL_WAKE_BEFORE_MS, plan.intervalMs() / 4);
+    }
+
+    /**
+     * How long after a frame the panel goes dark, or {@link Schedule#NONE} when it does not.
+     *
+     * <p>The dark window is what is left of the interval after the lit stretch on both sides: on this body's
+     * five-second interval the screen is dark for 2.75 s of every 5, and on a one-minute interval for 43 of
+     * them. That is the shape the feature is for — the panel is there to be read just before a frame and dark
+     * for the wait in which nobody is looking at it, and the exposure itself always happens with the panel lit
+     * and the body settled.
+     */
+    public static long panelOffDelayMs(Plan plan) {
+        if (!panelStaysOff(plan)) return Schedule.NONE;
+        return PANEL_OFF_AFTER_MS;
+    }
+
+    /**
+     * When the panel is switched back on, given where the run has got to.
+     *
+     * <p>An absolute instant on the run's own clock, like every other moment in this app: the frame is due at
+     * {@code dueMs}, so the panel is due back at {@code dueMs - panelLitMs}. Returns {@link Schedule#NONE}
+     * when there is no next frame — the end of a run has no deadline, so the caller wakes the panel once and
+     * stops.
+     *
+     * <p>Absolute rather than "wait N ms", because the wait is what a delayed task cannot promise: a frame
+     * that was answered late would otherwise have its wake-up pushed late with it, which is how the panel ends
+     * up still black when the shutter fires.
+     */
+    public static long panelWakeAtMs(Plan plan, long nowMs, long dueMs) {
+        if (dueMs == Schedule.NONE) return Schedule.NONE;
+        long wakeAt = dueMs - panelLitMs(plan);
+        return wakeAt - nowMs <= 0 ? nowMs : wakeAt;    // already inside the window: wake where we stand
+    }
 }

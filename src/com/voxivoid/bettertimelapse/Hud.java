@@ -124,18 +124,32 @@ public final class Hud {
      * the user cannot trust is worse than a key that does nothing.
      */
     public static String rowDetail(Plan plan, int row, boolean locked) {
+        return rowDetail(plan, row, locked, true);
+    }
+
+    /**
+     * The same, told whether this body can switch its display output at all.
+     *
+     * <p>One row's text depends on something only the camera can answer, which is why the "关屏" row was marked
+     * 尚未实现 for three milestones rather than guessed at. The answer travels as an argument because the row is
+     * drawn by a class that must not talk to Sony's classes: the shell finds out, the text says so.
+     */
+    public static String rowDetail(Plan plan, int row, boolean locked, boolean panelSwitchable) {
         if (locked && cameraRow(row)) {
             return "\u8fd0\u884c\u4e2d\u4e0d\u6539\u673a\u8eab\u8bbe\u7f6e";   // 运行中不改机身设置
         }
         switch (row) {
             case Plan.ROW_PANEL_OFF:
-                // The row exists, the setting is stored, and nothing acts on it yet. Saying "每张之后关屏"
-                // on a row that does not switch anything off is the same kind of lie as the old app's
-                // settings that were sent and never applied (U-07): the screen is where a user finds out,
-                // and it has to be right whether the feature is finished or not.
-                return plan.panelOff()
-                        ? "\u6bcf\u5f20\u4e4b\u540e\u5173\u5c4f\uff08\u5c1a\u672a\u5b9e\u73b0\uff09"  // 每张之后关屏（尚未实现）
-                        : "\u5c4f\u5e55\u4e00\u76f4\u4eae\u7740";                                      // 屏幕一直亮着
+                // Three answers, and only the first is a promise: the camera can do it and the plan has room for
+                // it; the setting is on but this body has no display call; the setting is on but the interval is
+                // too short to fit the two switches without eating the frame. The last two used to say 每张之后
+                // 关屏 as if they worked, which is the same lie as a setting that is sent and never applied.
+                if (!plan.panelOff()) return "\u5c4f\u5e55\u4e00\u76f4\u4eae\u7740";           // 屏幕一直亮着
+                if (!panelSwitchable) return "\u672c\u673a\u8eab\u5173\u4e0d\u4e86\u5c4f";    // 本机身关不了屏
+                if (!Frames.panelStaysOff(plan)) {
+                    return "\u95f4\u9694\u592a\u77ed\uff0c\u5173\u4e0d\u4e86\u5c4f";            // 间隔太短，关不了屏
+                }
+                return "\u6bcf\u5f20\u4e4b\u540e\u5173\u5c4f";                                 // 每张之后关屏
             case Plan.ROW_SILENT:
                 // These two were the wrong way round: "每张不动机械快门" is what the row does when the
                 // silent shutter is ON, and it was being shown when it was off. What the user needs is the

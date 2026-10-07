@@ -290,6 +290,20 @@ public final class LogLines {
         return "resume at=" + rel(atMs);
     }
 
+    /**
+     * The panel going off or coming back on, and which platform call did it.
+     *
+     * <p>Its own line because it is the only event in this app that changes the camera's screen, and because
+     * the first run needs to say which of the candidate calls the body accepted: the method name came from an
+     * app that compiled against a stub, and a stub proves nothing about a body. A run that keeps shooting with
+     * no {@code panel} line at all is a run where the feature was off, or the plan had no room for it.
+     */
+    public static String panel(String action, String working, String problem) {
+        return "panel " + text(action, "?")
+                + " via=" + text(working, "?")
+                + (problem == null || problem.length() == 0 ? "" : " problem=" + text(problem, "?"));
+    }
+
     /** The frames the card never answered for, said in the file the way the panel says it on screen. */
     public static String shortfall(int taken, int accounted) {
         return "shortfall taken=" + taken + " accounted=" + accounted;

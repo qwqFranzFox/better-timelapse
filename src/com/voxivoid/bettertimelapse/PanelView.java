@@ -87,6 +87,15 @@ public final class PanelView extends View {
     private String logNote = "";
 
     /**
+     * Whether this body can switch its own display output, asked once by the shell.
+     *
+     * <p>Only one row's text depends on it. The panel cannot find out for itself — it must not touch Sony's
+     * classes, and it must not touch Android's either, which is what lets it be drawn and reviewed off the
+     * camera. So the shell asks, and the panel says what the answer means for the row in front of the user.
+     */
+    private boolean panelSwitchable = true;
+
+    /**
      * A page of text to read on the panel, or null.
      *
      * <p>For the answers that do not fit anywhere: this body reports 298 live parameters, the filter that
@@ -326,6 +335,13 @@ public final class PanelView extends View {
      */
     public void setLogNote(String message) {
         logNote = message == null ? "" : message;
+        invalidate();
+    }
+
+    /** Whether this body can switch its own display output, which the 关屏 row's text depends on. */
+    public void setPanelSwitchable(boolean switchable) {
+        if (panelSwitchable == switchable) return;
+        panelSwitchable = switchable;
         invalidate();
     }
 
@@ -595,7 +611,7 @@ public final class PanelView extends View {
             canvas.drawText(value, padding * 2.2f + nameWidth, baseline, paint);
 
             String detail = Hud.rowDetail(engine.plan(), i,
-                    engine.midRun() && Hud.cameraRow(i));
+                    engine.midRun() && Hud.cameraRow(i), panelSwitchable);
             String hint = detail.length() > 0 ? detail : Steps.hint(i, engine.plan().get(i));
             float hintX = w - padding - hintWidth;
             if (hintX > padding * 2.2f + nameWidth + w * 0.20f) {
