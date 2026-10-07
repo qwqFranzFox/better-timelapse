@@ -331,8 +331,16 @@ public final class Hud {
         return (float) landed / (float) planned;
     }
 
-    /** How long the anti-burn-in drift takes to go up and come back. Slow enough to be unnoticed. */
-    public static final long BURN_IN_PERIOD_MS = 60_000;
+    /**
+     * How long the anti-burn-in drift takes to go up and come back.
+     *
+     * <p>Ten seconds rather than the minute it started at, at the user's request. A minute of travel is invisible
+     * by design, which is what it should be on a real shoot -- but it is also invisible to the person checking
+     * whether the feature works at all. Ten seconds makes the movement something that can be looked at, and the
+     * travel is one bar height each way; the value can go back up once it has been seen to work
+     * (docs/DECISIONS.md A55).
+     */
+    public static final long BURN_IN_PERIOD_MS = 10_000;
 
     /**
      * Where to draw a fixed piece of screen so that it does not sit in the same place for hours.

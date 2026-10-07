@@ -558,7 +558,7 @@ public final class PanelView extends View {
                 float barHeight = Math.max(2f, smallSize * 0.34f);
                 // The whole bar drifts up and down over a minute, so the lit rows are not the same rows for the
                 // hours a long run takes (Hud.burnInShift).
-                float top = y - smallSize * 0.62f + Hud.burnInShift(now(), barHeight * 1.5f);
+                float top = y - smallSize * 0.62f + Hud.burnInShift(now(), barHeight * 2.5f);
                 float filled = track * Math.max(0f, Math.min(1f, fraction));
                 paint.setColor(colDim);
                 canvas.drawRect(x, top, x + track, top + barHeight, paint);

@@ -265,6 +265,35 @@ class EngineTest {
     }
 
     @Test
+    void theFramesStillComeAfterPauseAndResume() {
+        // The shell pressed TRASH twice and got a run stuck on the word for "waiting": the engine resumed, the
+        // timetable rebased, and nothing ever armed the timer behind it. This is the contract it broke, stated
+        // where it can be checked: resume asks for the timer, and the frames keep coming on the new grid.
+        Shell shell = new Shell(plan(2000, 5, 0), 0);
+        shell.start();
+        assertEquals(0, shell.shoot());
+
+        shell.now = 1_000;
+        shell.engine.step(Engine.EV_TRASH, shell.now);
+        assertEquals(Engine.PAUSED, shell.engine.state());
+
+        // Ten minutes later the user presses it again.
+        shell.now = 600_000;
+        assertEquals(Engine.ACT_ARM_TIMER, shell.engine.step(Engine.EV_TRASH, shell.now),
+                "resume must ask for its timer to be armed: the caller that ignores this leaves the run dead");
+        assertEquals(0, shell.engine.remainingMs(shell.now), "rebased to now, so the next frame is due at once");
+
+        // And the run carries on from here, on the interval it was promised.
+        assertEquals(600_000, shell.shoot());
+        assertEquals(602_000, shell.shoot());
+        assertEquals(604_000, shell.shoot());
+        // Four frames in total: one before the pause and three after. The moments that went by during the
+        // pause are NOT replayed -- a ten-minute pause in a five-frame run must not empty the buffer as fast as
+        // the body allows, which is the old app's silent catch-up shooting (docs/PAIN-POINTS.md U-18).
+        assertEquals(4, shell.engine.fired());
+    }
+
+    @Test
     void theCentreButtonAcknowledgesAFinishedRun() {
         Shell shell = new Shell(plan(1000, 2, 0), 0);
         shell.start();

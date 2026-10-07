@@ -1781,18 +1781,26 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             case Keys.K_SK2:
                 handler.removeCallbacks(onTrashHold);
                 if (trash.up() == Keys.Hold.SHORT) {
-                    panel.trash(now());
-                    if (engine.state() == Engine.PAUSED) {
+                    int before = engine.state();
+                    panel.trash(now());                 // steps the engine: pause, resume, or nothing
+                    int after = engine.state();
+                    if (after == Engine.PAUSED && before != Engine.PAUSED) {
                         log(LogLines.pause(runStartMs(), "trash", Device.batteryPercent(this)));
                         // Once per pause, and again the next time: the count is the card's, so it is taken
                         // after the walk this starts. See logSummary.
                         summaryLogged = false;
                         finalWalks = 0;
                         walkCard();
-                    } else if (engine.midRun()) {
+                    } else if (before == Engine.PAUSED && after != Engine.PAUSED) {
                         log(LogLines.resume(runStartMs()));
                         summaryLogged = false;
                         finalWalks = 0;
+                        // The engine has just rebased the timetable to "now" and asked for its timer to be
+                        // armed -- and this used to be the end of it. Nothing drove the engine after the
+                        // resume, so it sat in WAITING with no timer behind it and no frame ever came: the
+                        // user pressed TRASH twice and got a camera that had stopped, showing the word for
+                        // "waiting". The pause path pumps through its card walk; this one has to say so.
+                        pump();
                     }
                 }
                 return true;
