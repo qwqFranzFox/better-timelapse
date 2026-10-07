@@ -15,7 +15,7 @@ extern "C"
 using namespace std;
 
 /*
- * Settings-store access for com.voxivoid.bettertimelapse.NativeStore, through the
+ * Settings-store access for com.github.qwqfranzfox.bettertimelapse.NativeStore, through the
  * same driver path OpenMemories-Tweak uses.
  *
  * The whole surface is four calls, and the rules the Java side relies on are
@@ -29,7 +29,7 @@ using namespace std;
 
 static void throw_native(JNIEnv *env, const char *msg)
 {
-    jclass c = env->FindClass("com/voxivoid/bettertimelapse/NativeException");
+    jclass c = env->FindClass("com/github/qwqfranzfox/bettertimelapse/NativeException");
     if (c) env->ThrowNew(c, msg);
 }
 
@@ -41,7 +41,7 @@ static int prop_size(int id)
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_voxivoid_bettertimelapse_NativeStore_read(JNIEnv *env, jclass clazz, jint id)
+Java_com_github_qwqfranzfox_bettertimelapse_NativeStore_read(JNIEnv *env, jclass clazz, jint id)
 {
     jbyteArray arr = NULL;
     try {
@@ -58,7 +58,7 @@ Java_com_voxivoid_bettertimelapse_NativeStore_read(JNIEnv *env, jclass clazz, ji
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_voxivoid_bettertimelapse_NativeStore_write(JNIEnv *env, jclass clazz, jint id, jbyteArray data)
+Java_com_github_qwqfranzfox_bettertimelapse_NativeStore_write(JNIEnv *env, jclass clazz, jint id, jbyteArray data)
 {
     try {
         jsize n = env->GetArrayLength(data);
@@ -75,7 +75,7 @@ Java_com_voxivoid_bettertimelapse_NativeStore_write(JNIEnv *env, jclass clazz, j
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_voxivoid_bettertimelapse_NativeStore_attr(JNIEnv *env, jclass clazz, jint id)
+Java_com_github_qwqfranzfox_bettertimelapse_NativeStore_attr(JNIEnv *env, jclass clazz, jint id)
 {
     int res = Backup_get_attribute(id);
     if (res < 0) throw_native(env, "Backup_get_attribute failed");
@@ -83,7 +83,7 @@ Java_com_voxivoid_bettertimelapse_NativeStore_attr(JNIEnv *env, jclass clazz, ji
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_voxivoid_bettertimelapse_NativeStore_sync(JNIEnv *env, jclass clazz)
+Java_com_github_qwqfranzfox_bettertimelapse_NativeStore_sync(JNIEnv *env, jclass clazz)
 {
     Backup_sync_all();
 }

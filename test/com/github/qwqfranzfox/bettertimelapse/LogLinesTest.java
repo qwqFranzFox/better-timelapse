@@ -1,0 +1,249 @@
+package com.github.qwqfranzfox.bettertimelapse;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+/**
+ * The session log's lines.
+ *
+ * <p>The format is the one docs/PLAN.md §5.2 promised, and it is checked here for the two properties that
+ * make a log worth keeping: a line says what happened without needing the screen next to it, and a line
+ * cannot be broken by the value inside it — a device name with a space in it, an exception message with a
+ * newline in it, a missing battery reading — because a log that a script cannot read is a log nobody reads.
+ */
+class LogLinesTest {
+
+    @Test
+    void aShotLineCarriesTheFactsTheTimetableIsJudgedBy() {
+        String line = LogLines.shot(7, 8, 30_000, 120, 4200, 916);
+
+        assertTrue(line.startsWith("shot press=7 moment=8 "), line);
+        assertTrue(line.contains("at=+30.000s"), line);
+        assertTrue(line.contains("late=120ms"), line);
+        assertTrue(line.contains("window=4200ms"), line);
+        assertTrue(line.contains("cb=+916ms"), line);
+    }
+
+    @Test
+    void aFrameWithNoCallbackSaysSoRatherThanClaimingZero() {
+        assertTrue(LogLines.shot(1, 1, 0, 0, 2500, Frames.UNKNOWN).contains("cb=-"),
+                "no callback is not a callback of zero");
+    }
+
+    @Test
+    void theVerdictSaysWhatTheCardAnswered() {
+        assertTrue(LogLines.verdict(7, 651, 1, true, 858).contains("result=ok"));
+        assertTrue(LogLines.verdict(7, 651, 0, false, 858).contains("result=unverified"));
+    }
+
+    @Test
+    void aValueCannotBreakTheLineItIsOn() {
+        String line = LogLines.problem("write", "open failed: EACCES\n(second line)");
+
+        assertFalse(line.contains("\n"), "a newline inside a value would split one event into two lines");
+        assertTrue(line.contains("EACCES_(second_line)"), line);
+    }
+
+    @Test
+    void unknownReadingsAreQuestionMarksAndNotZeroes() {
+        assertTrue(LogLines.start("/mnt/sdcard/DCIM", Frames.UNKNOWN, -1, -1).contains("count=?"));
+        assertTrue(LogLines.start("/mnt/sdcard/DCIM", Frames.UNKNOWN, -1, -1).contains("free=?"));
+        assertTrue(LogLines.start("/mnt/sdcard/DCIM", Frames.UNKNOWN, -1, -1).contains("bat=?"));
+
+        assertTrue(LogLines.body("ILCE-6300", "2.15", Frames.UNKNOWN, false, 0, 3700)
+                .contains("exposure=?"));
+    }
+
+    @Test
+    void theBodyLineSaysWhatAFrameCostsIncludingTheDarkFrame() {
+        String line = LogLines.body("ILCE-6300", "2.15", 4000, true, 8000, 8200);
+
+        assertTrue(line.contains("model=ILCE-6300"), line);
+        assertTrue(line.contains("exposure=4000ms"), line);
+        assertTrue(line.contains("nr=on"), line);
+        assertTrue(line.contains("occupancy=8000ms"), line);
+        assertTrue(line.contains("shortest=8200ms"), line);
+    }
+
+    @Test
+    void thePlanLineIsTheOneThePanelShows() {
+        Plan plan = new Plan();
+        plan.set(Plan.ROW_INTERVAL, 5000);
+        plan.set(Plan.ROW_SETTLE, 1);
+        plan.set(Plan.ROW_SILENT, 1);
+
+        String line = LogLines.plan(plan);
+
+        assertTrue(line.contains("interval=5000ms"), line);
+        assertTrue(line.contains("frames=300"), line);
+        assertTrue(line.contains("settle=1200ms"), line);
+        assertTrue(line.contains("silent=on"), line);
+        assertTrue(line.contains("drive=single"), line);
+        // Off by default now, and the log has to say what the run actually did rather than what the app
+        // prefers: darkening this body's panel is what made it ask to repair its card data (A50, A51).
+        assertTrue(line.contains("paneloff=off"), line);
+        assertTrue(line.contains("cardcheck=on"), line);
+    }
+
+    @Test
+    void anUnlimitedRunSaysUnlimitedRatherThanAValueInAMinus() {
+        Plan plan = new Plan();
+        plan.set(Plan.ROW_FRAMES, Plan.FRAMES_UNLIMITED);
+        assertTrue(LogLines.plan(plan).contains("frames=unlimited"), LogLines.plan(plan));
+    }
+
+    @Test
+    void aFaultIsNamedInTheLogsOwnLanguage() {
+        assertEquals("camera", LogLines.faultName(Engine.FAULT_CAMERA));
+        assertEquals("card", LogLines.faultName(Engine.FAULT_CARD));
+        assertEquals("write", LogLines.faultName(Engine.FAULT_WRITE));
+        assertEquals("shutter", LogLines.faultName(Engine.FAULT_SHUTTER));
+        assertEquals("aborted", LogLines.faultName(Engine.FAULT_ABORTED));
+        assertEquals("none", LogLines.faultName(Engine.FAULT_NONE));
+    }
+
+    @Test
+    void theRelativeClockIsSecondsWithMilliseconds() {
+        assertEquals("+0.000s", LogLines.rel(0));
+        assertEquals("+12.345s", LogLines.rel(12_345));
+        assertEquals("+3600.000s", LogLines.rel(3_600_000));
+        assertEquals("?", LogLines.rel(Frames.UNKNOWN));
+    }
+
+    @Test
+    void theEndOfARunDoesNotClaimAVerdictThatIsStillPending() {
+        String line = LogLines.end("done", 1, 0, 4, 1);
+        assertTrue(line.contains("pending=1"), line);
+        assertFalse(line.contains("unverified="), "a pending verdict is not a missing file: " + line);
+
+        // The summary is the line that waits for the last verdict, and the first real log is why it exists:
+        // END said verified=0 pending=1 one line above verdict result=ok.
+        String summary = LogLines.summary(1, 1, 4, 0, 12_992);
+        assertTrue(summary.contains("landed=1"), summary);
+        assertTrue(summary.contains("verified=1"), summary);
+        assertTrue(summary.contains("missed=0"), summary);
+        assertTrue(summary.contains("skipped=4"), summary);
+        assertTrue(summary.contains("elapsed=12.992s"), summary);
+    }
+
+    @Test
+    void aRunStoppedByHandStillSaysWhatItGot() {
+        // The session log of a 300-frame run stopped with TRASH ended at `pause at=+13.176s reason=trash` and
+        // stopped there: `summary` returned early while the engine was mid-run, and a run that was paused is
+        // mid-run. A night's shoot carried home that way read exactly like a crash.
+        String paused = LogLines.summary("paused", 3, 3, 0, 0, 13_176);
+        assertTrue(paused.startsWith("summary outcome=paused "), paused);
+        assertTrue(paused.contains("landed=3"), paused);
+        assertTrue(paused.contains("verified=3"), paused);
+        assertTrue(paused.contains("elapsed=13.176s"), paused);
+        // The count is taken after the card has answered for the last frame, so it can be a frame short: the
+        // word is what says the number is provisional rather than final.
+        String provisional = LogLines.summary("paused", 3, 2, 0, 1, 13_176);
+        assertTrue(provisional.contains("missed=1"), provisional);
+    }
+
+    @Test
+    void everySummarySaysWhichOutcomeItIs() {
+        // A reader with only the last line of a file has to be able to tell "it finished" from "it was
+        // stopped" from "it broke" -- those need three different answers from whoever reads the run.
+        assertTrue(LogLines.summary(5, 5, 0, 0, 22_841).contains("outcome=done"));
+        assertTrue(LogLines.summary("fault", 5, 5, 0, 0, 22_841).contains("outcome=fault"));
+        assertTrue(LogLines.summary("paused", 5, 5, 0, 0, 22_841).contains("outcome=paused"));
+    }
+
+    @Test
+    void theSummaryCarriesTheCardsOwnTallyNextToTheLedgers() {
+        // A 20-frame run came home saying `landed=20 verified=19 missed=1` while the card's own count went
+        // 647 -> 667 and all 20 shutter callbacks arrived: nothing was missing, one walk had reported the same
+        // count twice and a frame's credit went with it. `missed=` is the ledger; `card=` is the card. Both go
+        // in, because `missed=1 card=+20` is a bookkeeping lag and `missed=11 card=+6` is eleven photographs
+        // that do not exist -- and only the second is a reason to go back to the camera.
+        String lag = LogLines.summary("done", 20, 19, 0, 1, 98_882, 20);
+        assertTrue(lag.contains("missed=1"), lag);
+        assertTrue(lag.contains("card=+20"), lag);
+
+        String real = LogLines.summary("done", 17, 6, 0, 11, 12_992, 6);
+        assertTrue(real.contains("missed=11"), real);
+        assertTrue(real.contains("card=+6"), real);
+
+        // A card that could not be counted from before the first frame says so, and does not get a zero that
+        // would read as "the card gained nothing".
+        assertTrue(LogLines.summary("done", 5, 5, 0, 0, 1000).contains("card=?"),
+                "the four-argument form has no card tally and must not invent one");
+        assertTrue(LogLines.summary("done", 5, 5, 0, 0, 1000, Frames.UNKNOWN).contains("card=?"));
+        assertTrue(LogLines.summary("done", 3, 0, 0, 3, 1000, 0).contains("card=0"));
+        assertTrue(LogLines.summary("done", 0, 0, 0, 0, 1000, -2).contains("card=-2"),
+                "a card that lost files during a run is a fact too");
+    }
+
+    @Test
+    void theSummaryMeasuresTheFilmAndNotJustTheRun() {
+        // The 20-frame run at 5s wrote `elapsed=98.882s`, which starts at the button: 3.934s of it was dead
+        // time before the first frame. The film is 94.948s long with 19 gaps, and that is the timeline a
+        // renderer reproduces -- 4997ms a frame, 2.7ms a frame tight against the 5000ms asked for.
+        long origin = 1_000_000;
+        long[] shots = new long[20];
+        for (int i = 0; i < shots.length; i++) shots[i] = origin + 2568 + i * 4997L;
+
+        String line = LogLines.summary("done", 20, 20, 0, 0, 98_882, 20, shots, 20);
+        assertTrue(line.contains("span=94.943s"), line);
+        assertTrue(line.contains("mean=4997ms"), line);
+        assertTrue(line.contains("elapsed=98.882s"), line);
+
+        // Fewer than two frames is not a film: an unknown span, not a zero one, so it cannot be read as
+        // "the run took no time".
+        assertTrue(LogLines.summary("done", 1, 1, 0, 0, 5000, 1, shots, 1).contains("span=? "));
+        assertTrue(LogLines.summary("done", 1, 1, 0, 0, 5000, 1, shots, 1).contains("mean=? "));
+        // A count larger than the array must not read past its end.
+        assertEquals(Frames.UNKNOWN, LogLines.spanMs(shots, 21));
+    }
+
+    @Test
+    void theLogNamesWhichClockIsWhich() {
+        // A press and a moment are different counters, and the first real log mixed them: four skips and one
+        // shot of a five-frame plan could not be told apart from five frames.
+        assertTrue(LogLines.shot(1, 3, 1000, 17, 2500, Frames.UNKNOWN).startsWith("shot press=1 moment=3 "));
+        assertTrue(LogLines.skip(2, 1000, 900, 3000).startsWith("skip moment=2 "));
+        assertTrue(LogLines.verdict(1, 648, 1, true, 1636).startsWith("verdict press=1 "));
+        assertTrue(LogLines.refused(4, 1000, 1, 5000, "err").startsWith("refused press=4 "));
+    }
+
+    @Test
+    void aRowTheUserTurnedIsInTheFileAndSaysWhetherItMovedTheClock() {
+        String line = LogLines.planEdit(Plan.ROW_INTERVAL, "5s", true);
+        assertTrue(line.contains("row=interval"), line);
+        assertTrue(line.contains("value=5s"), line);
+        assertTrue(line.contains("rebased=yes"), line);
+
+        assertTrue(LogLines.planEdit(Plan.ROW_FRAMES, "300 张", false).contains("rebased=no"));
+        assertEquals("interval", LogLines.rowName(Plan.ROW_INTERVAL));
+        assertEquals("paneloff", LogLines.rowName(Plan.ROW_PANEL_OFF));
+        assertEquals("row9", LogLines.rowName(9), "a row nobody named still gets a name");
+    }
+
+    @Test
+    void thePreflightLineSaysWhatTheUserDidAboutIt() {
+        // A run full of holes that was started by accident is a defect; the same run started deliberately is a
+        // decision, and only the file can tell them apart afterwards.
+        String ok = LogLines.preflight(5000, 3700, 50, true, "ok", "ok");
+        assertTrue(ok.contains("interval=5000ms"), ok);
+        assertTrue(ok.contains("shortest=3700ms"), ok);
+        assertTrue(ok.contains("exposure=50ms"), ok);
+        assertTrue(ok.contains("nr=on"), ok);
+        assertTrue(ok.contains("action=ok"), ok);
+
+        assertTrue(LogLines.preflight(3000, 3700, 50, true, "refused", "间隔 3s 短于…")
+                .contains("action=refused"));
+        assertTrue(LogLines.preflight(3000, 3700, 50, true, "override", "间隔 3s 短于…")
+                .contains("action=override"));
+    }
+
+    @Test
+    void theFirstLineSaysWhatTheFileIs() {
+        assertEquals("# better-timelapse session", LogLines.header());
+        assertEquals("schema=" + LogLines.SCHEMA, LogLines.schema());
+    }
+}

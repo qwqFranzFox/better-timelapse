@@ -26,7 +26,7 @@ Two deliberate design choices, both learned the hard way:
 
 Usage:
     tools/check-apk.py BetterTimelapse.apk
-    tools/check-apk.py BetterTimelapse.apk --package com.voxivoid.bettertimelapse --native-lib libbettertimelapse.so
+    tools/check-apk.py BetterTimelapse.apk --package com.github.qwqfranzfox.bettertimelapse --native-lib libbettertimelapse.so
 Exit status is 0 when every check passes, 1 otherwise.
 """
 

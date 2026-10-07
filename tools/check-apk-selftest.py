@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CHECKER = os.path.join(HERE, "check-apk.py")
 
-PACKAGE = "com.voxivoid.bettertimelapse"
+PACKAGE = "com.github.qwqfranzfox.bettertimelapse"
 NATIVE_LIB = "libbettertimelapse.so"
 
 MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>

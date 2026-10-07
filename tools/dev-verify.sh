@@ -323,7 +323,7 @@ public class ScalarProperties { public static String getString(String key) { ret
 EOF
     # R.java, in the shape aapt generates for our res/values/colors.xml.
     cat > "$STUBS/$APP_PACKAGE_PATH/R.java" <<'EOF'
-package com.voxivoid.bettertimelapse;
+package com.github.qwqfranzfox.bettertimelapse;
 public final class R {
     public static final class color {
         public static final int background = 0x7f020000, text = 0x7f020001, dim = 0x7f020002,

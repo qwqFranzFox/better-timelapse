@@ -7,7 +7,7 @@
   build writes a copy under out/ and points aapt at that, and never rewrites this file.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.voxivoid.bettertimelapse"
+    package="com.github.qwqfranzfox.bettertimelapse"
     android:versionCode="1000"
     android:versionName="0.1.0">
     <uses-sdk android:minSdkVersion="10" android:targetSdkVersion="10" />

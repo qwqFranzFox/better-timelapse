@@ -7,8 +7,8 @@
 
 # Java package. The source tree is src/<package as directories>/, and aapt generates R.java into
 # out/gen/<package as directories>/R.java from the manifest's package attribute.
-APP_PACKAGE="com.voxivoid.bettertimelapse"
-APP_PACKAGE_PATH="com/voxivoid/bettertimelapse"
+APP_PACKAGE="com.github.qwqfranzfox.bettertimelapse"
+APP_PACKAGE_PATH="com/github/qwqfranzfox/bettertimelapse"
 
 # The native library: System.loadLibrary("bettertimelapse") in NativeStore.java, and
 # LOCAL_MODULE := bettertimelapse in jni/Android.mk. All three must agree.

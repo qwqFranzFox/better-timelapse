@@ -59,11 +59,11 @@
 原则：**能不用相机决定的逻辑，全部放进纯类**。纯类是 `src/` 下不 import `android.*` 的类，被 `tools/test.sh` 用裸 JDK 编译，每一个都配测试。相机、UI、JNI 是外壳。
 
 ```
-AndroidManifest.xml            包名 com.voxivoid.bettertimelapse（待定，见 §3.4）
+AndroidManifest.xml            包名 com.github.qwqfranzfox.bettertimelapse（待定，见 §3.4）
 jni/jni.cpp                    四个 JNI 函数：read / write / attr / sync（settings store）
 jni/platform/                  git 子模块：ma1co/OpenMemories-Platform
 
-src/com/voxivoid/bettertimelapse/
+src/com/github/qwqfranzfox/bettertimelapse/
   ── 纯逻辑（可离机单测，禁止 android.*） ──────────────────────────────
   Plan.java          拍摄计划的模型：字段、默认值、不变量、序列化/反序列化、单位换算
   Steps.java         间隔与张数的档位表：值 ⇄ 档位双向映射，含「下一格增量」
@@ -162,7 +162,7 @@ Step next(State s, Event e, long nowMs);   // 纯函数：状态 + 事件 + 时�
 
 | 项目 | 值 |
 |---|---|
-| 包名 | `com.voxivoid.bettertimelapse`（待确认：也可以用 `com.bettertimelapse`；首次真机安装后**不可更改**，因为证书/包名决定能否覆盖安装） |
+| 包名 | `com.github.qwqfranzfox.bettertimelapse`（待确认：也可以用 `com.bettertimelapse`；首次真机安装后**不可更改**，因为证书/包名决定能否覆盖安装） |
 | 应用显示名 | 待定（`Better Timelapse` / `延时摄影`；`AndroidManifest` 里 `@string/app_name`） |
 | minSdk / targetSdk | 10 / 10（安装器在 >10 时警告甚至失败） |
 | ABI | `armeabi` only |

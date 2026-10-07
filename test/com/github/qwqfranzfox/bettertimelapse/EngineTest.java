@@ -1,0 +1,366 @@
+package com.github.qwqfranzfox.bettertimelapse;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+/**
+ * The run itself: the whole of a several-hour shoot, in milliseconds, with the clock handed in.
+ *
+ * <p>The engine was built to be driven like this — one {@code EV_*} in, one {@code ACT_*} out — so the
+ * cases nobody wants to reproduce at night are ordinary tests here: a camera that refuses three frames
+ * in a row, a shell that is held up past a frame's moment, the last moment of a run going by with no
+ * frame in it. Each of those was a real failure on the camera before it was a test.
+ */
+class EngineTest {
+
+    private static Plan plan(int intervalMs, int frames, int delayMs) {
+        Plan plan = new Plan();
+        plan.set(Plan.ROW_INTERVAL, intervalMs);
+        plan.set(Plan.ROW_FRAMES, frames);
+        plan.set(Plan.ROW_DELAY, delayMs);
+        return plan;
+    }
+
+    /**
+     * The shell, doing what {@code MainActivity} does with the engine's answers and nothing else: carry
+     * out the action, wait for the moment it was given, and hand the frame to the camera.
+     */
+    private static final class Shell {
+        final Engine engine;
+        long now;
+
+        Shell(Plan plan, long startMs) {
+            engine = new Engine(plan);
+            now = startMs;
+        }
+
+        /** Step the engine until it wants something other than a timer, advancing the clock to it. */
+        int pump() {
+            int action = engine.step(Engine.EV_TICK, now);
+            for (int guard = 0; action == Engine.ACT_ARM_TIMER; guard++) {
+                assertTrue(guard < 10_000, "the engine is arming timers without making progress");
+                long remaining = engine.remainingMs(now);
+                if (remaining == Schedule.NONE) return Engine.ACT_NONE;   // nothing left to wait for
+                now += Math.max(0, remaining);
+                action = engine.step(Engine.EV_TICK, now);
+            }
+            return action;
+        }
+
+        /** Shoot one frame the way the shell does: press at the due moment, then release. */
+        long shoot() {
+            assertEquals(Engine.ACT_FIRE, pump(), "the engine should be asking for a frame here");
+            long at = now;
+            engine.step(Engine.EV_UNVERIFIED, at);      // taken, and not yet accounted for on the card
+            return at;
+        }
+
+        void start() {
+            engine.step(Engine.EV_ENTER, now);
+        }
+    }
+
+    @Test
+    void aPunctualShellGetsEveryFrameOnItsOwnMoment() {
+        Shell shell = new Shell(plan(2000, 5, 0), 0);
+        shell.start();
+
+        long[] at = new long[5];
+        for (int i = 0; i < at.length; i++) at[i] = shell.shoot();
+
+        assertArrayEquals(new long[] { 0, 2000, 4000, 6000, 8000 }, at);
+        assertEquals(5, shell.engine.landed());
+        assertEquals(Engine.DONE, shell.engine.state(), "the last frame ends the run");
+        assertEquals(2000, shell.engine.meanIntervalMs(), "the measured spacing is the one asked for");
+    }
+
+    @Test
+    void theInitialDelayIsPartOfTheTimetable() {
+        Shell shell = new Shell(plan(1000, 3, 2500), 500);
+        shell.start();
+
+        assertEquals(3000, shell.shoot(), "first frame at start + delay");
+        assertEquals(4000, shell.shoot());
+        assertEquals(5000, shell.shoot());
+    }
+
+    @Test
+    void theTimetablesOriginIsTheInstantTheRunStarted() {
+        // What the session log of a 5-frame run measured: every frame's `at=` and `late=` agree that the
+        // timetable began at +2.561s while the `run start` line — written from the same clock — said +0.046s.
+        // The shell had put a log header, a device dump and a card walk between the two, and a zero-delay plan
+        // therefore handed its first frame to the camera 2.5 seconds early.
+        //
+        // The fix is structural (the shell arms before it logs), so what this test can hold is the contract it
+        // was violating: with no delay, moment 1 IS the origin, and every later moment is one interval further
+        // on. A reader of the log recovers the origin as `at - late - (moment-1) * interval`, and that number
+        // has to be the same for every frame of the run.
+        Shell shell = new Shell(plan(5000, 5, 0), 1_000_000);
+        shell.start();
+        assertEquals(0, shell.engine.remainingMs(1_000_000), "moment 1, with no delay, is the origin itself");
+
+        for (int i = 0; i < 5; i++) {
+            long at = shell.shoot();
+            long origin = at - (long) i * 5000;
+            assertEquals(1_000_000, origin, "frame " + (i + 1) + " does not agree about where the run began");
+        }
+    }
+
+    @Test
+    void aShellHeldUpPastAMomentSkipsItInsteadOfFiringTwice() {
+        Shell shell = new Shell(plan(2000, 4, 0), 0);          // press window 1600, margin 400
+        shell.start();
+        assertEquals(0, shell.shoot());
+
+        // The body was not free until well past the second moment. Firing now would put this frame on
+        // top of the next one; the moment is dropped and the next one is still taken where it was due.
+        shell.now = 3200;
+        assertEquals(4000, shell.shoot());
+
+        assertEquals(1, shell.engine.skipped());
+        assertEquals(2, shell.engine.landed());
+    }
+
+    @Test
+    void aFrameThatIsOnlySlightlyLateIsStillTaken() {
+        Shell shell = new Shell(plan(5000, 3, 0), 0);          // press window 2500, margin 2500
+        shell.start();
+        assertEquals(0, shell.shoot());
+
+        // 1 s late: the release still fits before the next moment, so the frame is worth taking.
+        shell.now = 6000;
+        assertEquals(6000, shell.shoot());
+        assertEquals(0, shell.engine.skipped());
+    }
+
+    @Test
+    void theLastMomentGoingByEndsTheRunRatherThanStrandingIt() {
+        Shell shell = new Shell(plan(2000, 2, 0), 0);
+        shell.start();
+        assertEquals(0, shell.shoot());
+
+        // The camera never came free again. Without the run noticing that it had just skipped its final
+        // moment, it sat in WAITING with no timer behind it: nothing on screen, nothing to press.
+        shell.now = 9000;
+        assertEquals(Engine.ACT_NONE, shell.pump());
+
+        assertEquals(Engine.DONE, shell.engine.state());
+        assertEquals(1, shell.engine.skipped());
+        assertEquals(1, shell.engine.landed());
+    }
+
+    @Test
+    void aRefusedShutterStopsTheRunAsAShutterProblem() {
+        Shell shell = new Shell(plan(5000, 10, 0), 0);
+        shell.start();
+
+        String why = "RuntimeException: BurstableTakePicture failed";
+        for (int i = 0; i < Engine.MAX_CONSECUTIVE_FAILURES; i++) {
+            assertEquals(Engine.ACT_FIRE, shell.pump());
+            shell.engine.onCallFailed(why, shell.now);
+        }
+
+        assertEquals(Engine.FAULT, shell.engine.state());
+        assertEquals(Engine.FAULT_SHUTTER, shell.engine.fault());
+        assertEquals(why, shell.engine.lastLoss(), "the platform's own words survive to the screen");
+        assertEquals(0, shell.engine.landed(), "a refused frame is not a frame");
+    }
+
+    @Test
+    void framesThatNeverReachTheCardStopTheRunAsAWriteProblem() {
+        Shell shell = new Shell(plan(5000, 10, 0), 0);
+        shell.start();
+
+        for (int i = 0; i < Engine.MAX_CONSECUTIVE_FAILURES; i++) {
+            assertEquals(Engine.ACT_FIRE, shell.pump());
+            shell.engine.onFrameLost("no file", shell.now);
+        }
+
+        assertEquals(Engine.FAULT_WRITE, shell.engine.fault());
+        assertTrue(shell.engine.faultText().length() > 0, "a fault with no words is not a diagnosis");
+    }
+
+    @Test
+    void oneFailureInTheMiddleOfARunDoesNotEndIt() {
+        Shell shell = new Shell(plan(5000, 6, 0), 0);
+        shell.start();
+
+        shell.shoot();
+        assertEquals(Engine.ACT_FIRE, shell.pump());
+        shell.engine.onFrameLost("no file", shell.now);
+        shell.shoot();
+
+        assertEquals(Engine.WAITING, shell.engine.state());
+        assertEquals(2, shell.engine.landed(), "a single slow write must not throw away a night");
+    }
+
+    @Test
+    void everyFrameStartsUnaccountedForAndTheCardClearsIt() {
+        Shell shell = new Shell(plan(2000, 3, 0), 0);
+        shell.start();
+        shell.shoot();
+
+        assertEquals(1, shell.engine.landed());
+        assertEquals(1, shell.engine.unverified(), "taken, and not yet seen on the card");
+        shell.engine.accountFor();
+        assertEquals(0, shell.engine.unverified());
+        shell.engine.accountFor();
+        assertEquals(0, shell.engine.unverified(), "the count never goes below zero");
+    }
+
+    @Test
+    void aSecondReportForTheSameFrameIsIgnored() {
+        Shell shell = new Shell(plan(2000, 3, 0), 0);
+        shell.start();
+        shell.shoot();
+
+        assertEquals(Engine.ACT_NONE, shell.engine.step(Engine.EV_SHUTTER, shell.now));
+        assertEquals(1, shell.engine.landed(), "two reports of one frame are still one frame");
+    }
+
+    @Test
+    void trashPausesAndTrashAgainPutsTheRunBack() {
+        Shell shell = new Shell(plan(2000, 10, 0), 0);
+        shell.start();
+        shell.shoot();
+
+        assertEquals(Engine.ACT_NONE, shell.engine.step(Engine.EV_TRASH, 1000));
+        assertEquals(Engine.PAUSED, shell.engine.state());
+        assertFalse(shell.engine.running(), "a paused run is not a run");
+        assertFalse(shell.engine.canFire(), "and it must not fire");
+
+        shell.now = 60_000;
+        assertEquals(Engine.ACT_ARM_TIMER, shell.engine.step(Engine.EV_TRASH, shell.now));
+        assertEquals(Engine.WAITING, shell.engine.state());
+        assertEquals(0, shell.engine.remainingMs(shell.now), "the next frame is due as soon as it resumes");
+        assertEquals(60_000, shell.shoot());
+    }
+
+    @Test
+    void aPendingTimerCannotFireAFrameOnAPausedRun() {
+        // Checked against a real session log, where a `pause` line is followed by another `shot` -- which read
+        // like a frame taken after the user stopped the run. It is not: the tick that was already armed when
+        // the key was pressed arrives while the state is PAUSED, and this is the guard that makes it a no-op.
+        // The shell's own timers are cancelled on pause as well, but a frame must never depend on the shell
+        // having remembered to do that.
+        Shell shell = new Shell(plan(5000, 10, 0), 0);
+        shell.start();
+        shell.shoot();
+        assertEquals(Engine.ACT_NONE, shell.engine.step(Engine.EV_TRASH, 1000));
+
+        shell.now = 7_560;                                    // the moment the next frame was due
+        assertEquals(Engine.ACT_NONE, shell.engine.step(Engine.EV_TICK, shell.now));
+        assertEquals(1, shell.engine.fired(), "no frame was handed to the camera after the pause");
+        assertEquals(Engine.PAUSED, shell.engine.state());
+
+        // And the frame that moment belonged to is still there to be taken when the run resumes: pausing is a
+        // pause, not a decision to drop it.
+        shell.engine.step(Engine.EV_TRASH, shell.now);
+        assertEquals(Engine.ACT_FIRE, shell.pump());
+        assertEquals(2, shell.engine.fired());
+    }
+
+    @Test
+    void theFramesStillComeAfterPauseAndResume() {
+        // The shell pressed TRASH twice and got a run stuck on the word for "waiting": the engine resumed, the
+        // timetable rebased, and nothing ever armed the timer behind it. This is the contract it broke, stated
+        // where it can be checked: resume asks for the timer, and the frames keep coming on the new grid.
+        Shell shell = new Shell(plan(2000, 5, 0), 0);
+        shell.start();
+        assertEquals(0, shell.shoot());
+
+        shell.now = 1_000;
+        shell.engine.step(Engine.EV_TRASH, shell.now);
+        assertEquals(Engine.PAUSED, shell.engine.state());
+
+        // Ten minutes later the user presses it again.
+        shell.now = 600_000;
+        assertEquals(Engine.ACT_ARM_TIMER, shell.engine.step(Engine.EV_TRASH, shell.now),
+                "resume must ask for its timer to be armed: the caller that ignores this leaves the run dead");
+        assertEquals(0, shell.engine.remainingMs(shell.now), "rebased to now, so the next frame is due at once");
+
+        // And the run carries on from here, on the interval it was promised.
+        assertEquals(600_000, shell.shoot());
+        assertEquals(602_000, shell.shoot());
+        assertEquals(604_000, shell.shoot());
+        // Four frames in total: one before the pause and three after. The moments that went by during the
+        // pause are NOT replayed -- a ten-minute pause in a five-frame run must not empty the buffer as fast as
+        // the body allows, which is the old app's silent catch-up shooting (docs/PAIN-POINTS.md U-18).
+        assertEquals(4, shell.engine.fired());
+    }
+
+    @Test
+    void theCentreButtonAcknowledgesAFinishedRun() {
+        Shell shell = new Shell(plan(1000, 2, 0), 0);
+        shell.start();
+        shell.shoot();
+        shell.shoot();
+        assertEquals(Engine.DONE, shell.engine.state());
+
+        shell.engine.step(Engine.EV_ENTER, shell.now);
+
+        assertEquals(Engine.IDLE, shell.engine.state());
+        assertEquals(0, shell.engine.landed());
+        assertEquals(0, shell.engine.unverified());
+        assertEquals(0, shell.engine.fired());
+    }
+
+    @Test
+    void aStopWithNoFaultIsAFinishedRunAndNotAFailure() {
+        Shell shell = new Shell(plan(5000, 100, 0), 0);
+        shell.start();
+        shell.shoot();
+        shell.shoot();
+
+        // What MENU does during a run now: end it cleanly. The frames are on the card, the panel says how
+        // many, and there is no fault to explain because nothing went wrong.
+        shell.engine.stop(Engine.FAULT_NONE, shell.now);
+
+        assertEquals(Engine.DONE, shell.engine.state());
+        assertEquals(Engine.FAULT_NONE, shell.engine.fault());
+        assertEquals("", shell.engine.faultText(), "a run the user ended is not a fault");
+        assertEquals(2, shell.engine.landed(), "and what it shot is still counted");
+        assertFalse(shell.engine.midRun(), "so the next MENU press may leave the app");
+    }
+
+    @Test
+    void aPausedRunIsStillARunThePanelMustNotEditUnder() {
+        Shell shell = new Shell(plan(5000, 10, 0), 0);
+        shell.start();
+        shell.shoot();
+        shell.engine.step(Engine.EV_TRASH, shell.now);
+
+        assertEquals(Engine.PAUSED, shell.engine.state());
+        assertFalse(shell.engine.running(), "TRASH has to be able to resume it");
+        assertTrue(shell.engine.midRun(), "but it still owns the camera and the plan");
+    }
+
+    @Test
+    void holdingTrashStopsTheRunAndSaysTheUserDidIt() {
+        Shell shell = new Shell(plan(1000, 100, 0), 0);
+        shell.start();
+        shell.shoot();
+
+        shell.engine.step(Engine.EV_HOLD_TRASH, shell.now);
+
+        assertEquals(Engine.FAULT, shell.engine.state());
+        assertEquals(Engine.FAULT_ABORTED, shell.engine.fault());
+        assertEquals(1, shell.engine.landed(), "what was shot before the stop is still counted");
+    }
+
+    @Test
+    void canFireOnlyWhileAFrameIsInFlight() {
+        Shell shell = new Shell(plan(5000, 3, 0), 0);
+        shell.start();
+
+        assertFalse(shell.engine.canFire(), "armed is not exposing");
+        assertEquals(Engine.ACT_FIRE, shell.pump());
+        assertTrue(shell.engine.canFire(), "the frame is in flight");
+        shell.engine.step(Engine.EV_UNVERIFIED, shell.now);
+        assertFalse(shell.engine.canFire(), "and it is over");
+    }
+}

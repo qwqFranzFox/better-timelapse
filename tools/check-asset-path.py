@@ -21,7 +21,7 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-UIFONT = os.path.join(ROOT, "src", "com", "voxivoid", "bettertimelapse", "UiFont.java")
+UIFONT = os.path.join(ROOT, "src", "com", "github", "qwqfranzfox", "bettertimelapse", "UiFont.java")
 
 
 def asset_from_source():
