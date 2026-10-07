@@ -23,8 +23,16 @@ class PlanTest {
         assertFalse(p.autoExposureLock(), "AEL is off until asked for");
         assertEquals(Plan.DRIVE_SINGLE, p.driveMode(), "one press, one frame");
         assertEquals(0, p.delayMs());
-        assertEquals(2000, p.intervalMs());
+        assertEquals(5000, p.intervalMs());
         assertEquals(300, p.frames());
+    }
+
+    @Test
+    void theDefaultIntervalIsOneThisBodyCanActuallyShoot() {
+        // The default used to be 2 s, which this camera refuses (its floor is about 2.9 s), so a new user's
+        // first run began with the app warning them about the app's own default.
+        assertTrue(new Plan().intervalMs() >= Frames.shortestIntervalMs(),
+                "the plan a fresh install starts on has to be shootable on the body it runs on");
     }
 
     @Test

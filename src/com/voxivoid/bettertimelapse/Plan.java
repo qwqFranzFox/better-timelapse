@@ -53,7 +53,11 @@ public final class Plan {
 
     /** The documented defaults: nothing here changes the camera on its own. */
     public void reset() {
-        wanted[ROW_INTERVAL] = 2000;
+        // 5 s, not the 2 s this used to be: the body refuses anything under about 2.9 s
+        // (docs/PLATFORM-FACTS.md §4), so the old default meant the first thing a new user saw was the app
+        // telling them their own default was impossible. 5 s is the value that has actually been shot on
+        // this camera; a shorter one can be dialled in once it has been measured.
+        wanted[ROW_INTERVAL] = 5000;
         wanted[ROW_FRAMES] = 300;
         wanted[ROW_DELAY] = 0;
         wanted[ROW_SETTLE] = SETTLE_DEFAULT;
