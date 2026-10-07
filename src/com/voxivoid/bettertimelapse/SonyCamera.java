@@ -485,51 +485,67 @@ public final class SonyCamera {
             reviewControl = null;
             return false;
         }
-        // Two ways to ask for no review, and the order is deliberate: a zero review time first, because it is
-        // the direct statement of what is wanted, and `cancelAutoPictureReview` after it. On this body the
-        // first threw a NullPointerException from inside its own object -- reported, not hidden -- so the second
-        // is tried rather than the feature being declared impossible. Both are reflected: which one a body
-        // accepts is a fact about the body, and the log records which it was.
-        if (askReviewControl("setPictureReviewTime", new Class<?>[] { int.class }, new Object[] { 0 })) {
-            return finishReviewInstall("time=0");
-        }
+        // Install before configuring, and every attempt is recorded. Both of those are corrections:
+        //
+        //  - the old app constructs a control and installs it (ShootActivity:152-154) and never calls a method
+        //    on one that is not attached to a camera; this app called setPictureReviewTime(0) on a detached
+        //    object and got a NullPointerException from inside the body's own class, which is what a body does
+        //    when it is asked about a camera it has not been given yet;
+        //  - and the first version reported only the LAST failure. It printed
+        //    `cancelAutoPictureReview: NullPointerException` while the first attempt had also failed, so the
+        //    log named the wrong suspect. Reasons accumulate now.
+        if (!installReviewControl()) return false;
         if (askReviewControl("cancelAutoPictureReview", new Class<?>[] {}, new Object[] {})) {
-            return finishReviewInstall("cancelled");
+            return true;
+        }
+        if (askReviewControl("setPictureReviewTime", new Class<?>[] { int.class }, new Object[] { 0 })) {
+            return true;
         }
         if (reviewProblem.length() == 0) reviewProblem = "no review call accepted";
         reviewControl = null;
         return false;
     }
 
-    /** One attempt on the review control, recording why it failed rather than only that it did. */
+    /**
+     * One attempt on the review control.
+     *
+     * <p>Failure reasons accumulate rather than replace: which of two routes a body rejects is the useful part,
+     * and a log that keeps only the second one sends the next round after the wrong call.
+     */
     private boolean askReviewControl(String method, Class<?>[] types, Object[] args) {
         try {
             Object result = reviewControl.getClass().getMethod(method, types).invoke(reviewControl, args);
             if (result instanceof Boolean && !((Boolean) result)) {
-                reviewProblem = method + " refused";
-                return false;
+                return note(method + " refused");
             }
+            reviewMode = "cancelAutoPictureReview".equals(method) ? "cancelled" : "time=0";
+            reviewProblem = "";
             return true;
         } catch (Throwable t) {
-            reviewProblem = method + ": " + shortName(t);
-            return false;
+            return note(method + ": " + shortName(t));
         }
     }
 
-    /** Install whatever the control object ended up holding, and report what it was. */
-    private boolean finishReviewInstall(String mode) {
+    /** Add a reason to the list the panel and the log will show, and stay false. */
+    private boolean note(String reason) {
+        reviewProblem = reviewProblem.length() == 0 ? reason : reviewProblem + "; " + reason;
+        return false;
+    }
+
+    /** Hand the control object to the camera, which is what makes its methods mean anything. */
+    private boolean installReviewControl() {
         try {
             Class<?> controlClass = Class.forName(REVIEW_CONTROL);
             cameraEx.getClass().getMethod("setAutoPictureReviewControl", controlClass)
                     .invoke(cameraEx, reviewControl);
-            reviewMode = mode;
-            reviewProblem = "";
             return true;
         } catch (Throwable t) {
-            reviewProblem = shortName(t);
+            reviewProblem = "install: " + shortName(t);
+            reviewControl = null;
             return false;
         }
     }
+
 
     /** What the review control was set to, or an empty string when it was not installed. */
     public String reviewMode() {

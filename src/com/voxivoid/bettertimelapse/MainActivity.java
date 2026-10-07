@@ -326,15 +326,19 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // Leaving for good? Then the camera goes back the way it was found (docs/DECISIONS.md A10), and the
         // exit is written down: "the app was left mid-something" is a claim a log has to be able to support,
         // and the camera asking to repair its card data after some sessions is what it is there to explain.
-        if (isFinishing()) {
-            restoreCameraSettings();
-            log(LogLines.exit(engine.midRun(), engine.landed(), camera.previewing()));
-        }
+        boolean finishing = isFinishing();
+        if (finishing) restoreCameraSettings();
         camera.clearShutterListener();
         // No `release()` here any more: it means "let go of the shutter and start the preview again", which is
         // the opposite of what leaving is. `close()` stops the stream, cancels a capture that is still open and
         // then releases the handle, in that order.
         camera.close();
+        if (finishing) {
+            // Written after the teardown, not before it: the line exists to say what state the camera was left
+            // in, and the previous version asked before doing anything, so it reported `preview=running` on
+            // every exit -- which was true at the time and useless as evidence.
+            log(LogLines.exit(engine.midRun(), engine.landed(), camera.previewing()));
+        }
         super.onPause();
     }
 
