@@ -92,8 +92,26 @@ public final class Frames {
      * rather than applied quietly.
      */
     public static long pressWindowMs(Plan plan) {
-        return clamp(plan.intervalMs() - RELEASE_MARGIN_MS, PRESS_FLOOR_MS, PRESS_MS);
+        return pressWindowMs(plan, 0);
     }
+
+    /**
+     * The same, told how long the body's own shutter callback takes to arrive.
+     *
+     * <p>A callback that comes back ten seconds after the press is this body saying its exposure took ten
+     * seconds. Releasing the shutter at 2500 ms then would cut the exposure off mid-frame — so the window
+     * grows to cover what the body has already shown it needs, and never past the point where the next
+     * frame's moment would be eaten. {@code exposureHintMs} of zero (no callback ever seen, which is what
+     * a plain {@code takePicture} does on some bodies) leaves the constant in charge.
+     */
+    public static long pressWindowMs(Plan plan, long exposureHintMs) {
+        long wanted = Math.max(PRESS_MS, exposureHintMs + EXPOSURE_MARGIN_MS);
+        long latest = Math.max(PRESS_FLOOR_MS, plan.intervalMs() - RELEASE_MARGIN_MS);
+        return clamp(wanted, PRESS_FLOOR_MS, latest);
+    }
+
+    /** Kept clear after a shutter callback before the shutter is released. */
+    public static final long EXPOSURE_MARGIN_MS = 200;
 
     private static final long PRESS_FLOOR_MS = 600;
 

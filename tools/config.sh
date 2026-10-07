@@ -36,4 +36,5 @@ UNITS=(
     Schedule
     Engine
     Frames
+    BodyCycle
 )

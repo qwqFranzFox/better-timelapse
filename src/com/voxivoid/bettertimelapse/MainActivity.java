@@ -43,16 +43,18 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** How often the device status (battery, card) is re-read. Both change over minutes. */
     private static final long DEVICE_MS = 5000;
 
+    /** The wait before the first retry of a refused press, and the longest that wait may grow to. */
+    private static final long FIRE_RETRY_MS = 500, FIRE_RETRY_MAX_MS = 4000;
+
     /**
-     * How many times a refused shutter call is retried, and how long between attempts.
+     * The most attempts one frame gets before it is counted lost.
      *
-     * <p>The platform refuses {@code burstableTakePicture} while it is still busy with the previous
-     * frame. That is transient, and it is not a lost frame: the first version counted the refusal as a
-     * lost frame and stopped a run after the first photograph, over a camera that was merely still
-     * writing. Retries are cheap; a thrown-away night is not.
+     * <p>Twelve, with the wait doubling from 0.5 s to 4 s: about thirty-five seconds of trying. That is
+     * long enough to ride out a long exposure on an interval that can afford it — a body that needs twelve
+     * seconds will be asked five or six times, not five hundred — and short enough that a body which is
+     * genuinely stuck ends the run rather than holding a dark screen until dawn.
      */
-    private static final int FIRE_ATTEMPTS = 4;
-    private static final long FIRE_RETRY_MS = 500;
+    private static final int FIRE_ATTEMPTS_MAX = 12;
 
     /** Fallback frame size for the card estimate, until one can be measured off the card. */
     private static final long FALLBACK_FRAME_BYTES = 6L * 1024 * 1024;
@@ -92,6 +94,20 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
 
     /** Whether this app is the one holding the exposure lock. AEL cannot be read back, so it is tracked. */
     private boolean aelLockedByUs;
+
+    /**
+     * How long the body needs for a frame, learned from the frames it refused (docs/DECISIONS.md A27).
+     *
+     * <p>It replaces a constant that was measured once with a short exposure: a ten-second exposure is
+     * refused on every attempt, and that refusal is the body saying how long it needs.
+     */
+    private final BodyCycle body = new BodyCycle();
+
+    /** The longest the body's own shutter callback has taken, or 0 when it has never arrived. */
+    private long callbackHintMs;
+
+    /** Attempts at the frame currently due, and the wait before the next one. */
+    private long retryDelayMs = FIRE_RETRY_MS;
 
     /** When the current frame was handed to the camera, for the callback latency. */
     private long firedAtMs;
@@ -360,6 +376,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         }
         camera.setShutterListener(onShutter);
         panel.setCameraNote(camera.capabilities().summary(camera.previewing()));
+        // A different exposure, image quality or card changes what the body needs, and the measurement
+        // belongs to the body's state rather than to the app.
+        body.reset();
+        callbackHintMs = 0;
         seedPlanFromCamera();
         applyPlanToCamera();
     }
@@ -483,11 +503,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void warnIfImpossible() {
         Plan plan = engine.plan();
-        long shortest = Frames.shortestIntervalMs();
+        long shortest = body.shortestIntervalMs();
         if (plan.intervalMs() >= shortest) return;
         panel.setEvidence("\u95f4\u9694 " + Steps.shortMs(plan.intervalMs())                // 间隔
                 + " \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 "                        // 短于本机身所需的
-                + Steps.shortMs((int) shortest)                                                     // 2.9s
+                + Steps.shortMs((int) shortest)                                                     // 2.9s（或实测下界）
+                + (body.known() ? "\uff08\u5b9e\u6d4b\uff09" : "")                             // （实测）
                 + "\uff1a\u76f8\u673a\u4f1a\u6765\u4e0d\u53ca");                          // ：相机会来不及
     }
 
@@ -558,33 +579,47 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             return;
         }
         if (!camera.fire()) {
-            // The call itself was refused. What the platform said goes on the evidence line, which
-            // keeps the first failure it is told about: "快门调用失败" on its own is not a diagnosis,
-            // and the fault that follows is not "the frame was not written" — this app knows nothing
-            // about the card when the shutter never fired.
+            // The call itself was refused, and a refusal is a measurement: the body was still busy at this
+            // instant, which is at least one interval after the previous frame started. That is the honest
+            // way to learn what this body needs — no exposure time to read, no busy flag to ask, and a
+            // constant that is wrong the moment somebody sets a long exposure (docs/DECISIONS.md A27).
+            long refusedAtMs = now();
+            body.refused(refusedAtMs);
             String why = camera.lastError();
-            panel.setEvidence("\u5feb\u95e8\u8c03\u7528\u5931\u8d25\uff1a" + why);       // 快门调用失败：
+            panel.setEvidence(body.known()
+                    ? "\u5feb\u95e8\u88ab\u62d2\uff1a\u6bcf\u5f20\u81f3\u5c11 "                                  // 快门被拒：每张至少
+                            + Steps.shortMs((int) body.lowerBoundMs()) + "\uff0c\u95f4\u9694\u592a\u77ed"     // N，间隔太短
+                    : "\u5feb\u95e8\u8c03\u7528\u5931\u8d25\uff1a" + why);                            // 快门调用失败：
             fireAttempts++;
-            if (fireAttempts < FIRE_ATTEMPTS) {
-                // Let go before asking again: a shutter still held is the usual reason for a refusal,
-                // and a retry is worth nothing while the thing that caused it is still in flight.
+            // Retried while the frame still fits: a body that is busy for longer than the constant the app
+            // was built around is exactly the case worth waiting out, and giving up after 1.5 s of trying
+            // (which is what this used to do) throws away the frame instead.
+            if (fireAttempts < FIRE_ATTEMPTS_MAX && Frames.stillFits(engine.plan(), engine.remainingMs(now()))) {
+                // Let go before asking again: a shutter still held is the usual reason for a refusal, and a
+                // retry is worth nothing while the thing that caused it is still in flight.
                 camera.release();
-                handler.postDelayed(onRetryFire, FIRE_RETRY_MS);
+                handler.postDelayed(onRetryFire, retryDelayMs);
+                // Backing off, because a body that needs twelve seconds is not going to be ready in 500 ms
+                // and there is no point asking it five hundred times.
+                retryDelayMs = Math.min(retryDelayMs * 2, FIRE_RETRY_MAX_MS);
                 panel.invalidate();
                 return;
             }
             fireAttempts = 0;
+            retryDelayMs = FIRE_RETRY_MS;
             panel.setCameraNote("\u5feb\u95e8\u8c03\u7528\u5931\u8d25\uff1a" + why);     // 快门调用失败：
             engine.onCallFailed(why, now());
             pump();
             return;
         }
         fireAttempts = 0;
+        retryDelayMs = FIRE_RETRY_MS;
+        body.accepted(firedAtMs);
         // The shutter is held, not just pressed: the release is what ends the capture and what the next
         // frame waits for. It is scheduled here, against the frame's own moment, so the press window is
         // as long as this body wants it to be and no longer (docs/DECISIONS.md A20).
         handler.removeCallbacks(onRelease);
-        handler.postDelayed(onRelease, Frames.pressWindowMs(engine.plan()));
+        handler.postDelayed(onRelease, Frames.pressWindowMs(engine.plan(), callbackHintMs));
     }
 
     /**
@@ -637,7 +672,13 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         public void run() {
             if (engine.state() != Engine.EXPOSING) return;      // already released
             callbacks++;
-            if (firedAtMs > 0) callbackMsTotal += now() - firedAtMs;
+            if (firedAtMs > 0) {
+                long took = now() - firedAtMs;
+                callbackMsTotal += took;
+                // The longest one seen, not the mean: a callback that arrives after ten seconds is the body
+                // saying its exposure took ten seconds, and the release has to wait for that.
+                if (took > callbackHintMs) callbackHintMs = took;
+            }
         }
     };
 
@@ -755,7 +796,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 + "  \u5361 " + (cardCount == Frames.UNKNOWN ? "?" : String.valueOf(cardCount))
                 + "  \u8bfb\u6570 " + walkMs + "ms"                                         // 读数
                 + "  \u56de\u6267 " + callbacks + "/" + engine.landed()                      // 回执
-                + (callbacks > 0 ? " +" + (callbackMsTotal / callbacks) + "ms" : ""));
+                + (callbacks > 0 ? " +" + (callbackMsTotal / callbacks) + "ms" : "")
+                + (body.known()                                                             // 机身
+                        ? "  \u673a\u8eab >" + Steps.shortMs((int) body.lowerBoundMs())
+                        : ""));
     }
 
     /** Frames the card has answered for: taken, and no longer outstanding. */

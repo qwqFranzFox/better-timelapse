@@ -46,6 +46,26 @@ class FramesTest {
     }
 
     @Test
+    void aLongExposureLengthensThePressWindow() {
+        Plan p = plan(30_000, 10);
+
+        assertEquals(Frames.PRESS_MS, Frames.pressWindowMs(p, 0), "no callback seen: the constant rules");
+
+        // A shutter callback that arrives ten seconds after the press is this body saying its exposure took
+        // ten seconds. Releasing at 2.5 s would cut that exposure off mid-frame.
+        assertEquals(10_200, Frames.pressWindowMs(p, 10_000));
+    }
+
+    @Test
+    void thePressWindowNeverEatsTheNextFramesMoment() {
+        Plan p = plan(4000, 10);                     // the body says ten seconds, the interval is four
+
+        // The window is shortened to what the interval can afford rather than allowed to run past it: the
+        // frame will be late or lost, and the preflight is where that gets said.
+        assertEquals(3600, Frames.pressWindowMs(p, 10_000));
+    }
+
+    @Test
     void theShortestIntervalIsThePressWindowPlusTheMargin() {
         assertEquals(2900, Frames.shortestIntervalMs());
         assertTrue(Frames.shortestIntervalMs() > Frames.PRESS_MS);
