@@ -130,6 +130,22 @@ that list — which is why they can be checked without a camera.
 | [docs/PAIN-POINTS.md](docs/PAIN-POINTS.md) | The pre-existing app's defects, each with `file:line` evidence — the reason for a rewrite rather than a patch. |
 | [docs/FEEL-PLAN.md](docs/FEEL-PLAN.md) | What using it feels like, the known rough edges, and the order they will be fixed in. |
 
+## Built on the work of others
+
+This app is an independent implementation, but not an independent idea. It exists because two projects came
+before it, both MIT-licensed, and **no code from either is used here** — what was taken is what they learned,
+what they measured, and what they got wrong.
+
+| | What this project took from it |
+|---|---|
+| **[TimeLapse](https://github.com/jonasjuffinger/TimeLapse)** — Jonas Juffinger's time-lapse app, which runs on the same camera bodies as this one | The capture idiom that works on this hardware: a press/release pair (`takePicture` … `cancelTakePicture` + `startPreview`) with a live preview stream, and the 2500 ms shutter window it measured. Its display-off approach, which is the only thing known to darken this panel, and — documented line by line in [PAIN-POINTS](docs/PAIN-POINTS.md) — its twenty user-facing and twenty engineering defects, which are why this is a rewrite rather than a patch. |
+| **[Recipe Lab](https://github.com/voxivoid/recipe-lab-sony-pmca)** — a Sony PMCA app by André Domingues | The engineering practice, most of it worth copying wholesale: no Gradle but a seven-step `build.sh`, a pinned toolchain in a container, decision classes that compile with **no `android.jar`** so the arithmetic can be tested off the camera, a bundled CJK font subset with a script and a coverage check, and its honesty about what a green build does and does not prove. Its capture loop on this same body (2500 ms press + 1200 ms settle) is also where this app's default interval comes from. |
+| **[Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE)** and **[OpenMemories](https://github.com/ma1co/OpenMemories-Framework)** — ma1co | Everything that makes a third-party app possible on these cameras at all: the installer, the platform drivers this app's `jni/` submodule builds against, and the reverse-engineered API surface that says which Sony classes and methods exist. |
+| **[FocusBracket](https://github.com/obs1dium/FocusBracket)** — obs1dium | Not used directly here, but it is the code base TimeLapse was built from, so the capture path this app inherits traces back through it. |
+
+If you are writing an app for one of these cameras, read those repositories first. What the [docs](docs/) here
+add is a measurement of what this particular body actually does.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE). The bundled font is a subset of Sarasa Gothic under the SIL Open Font License 1.1,

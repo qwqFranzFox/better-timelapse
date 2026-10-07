@@ -26,7 +26,7 @@ SOFTWARE.
 
 The MIT terms above apply to this project's own code: everything under `src/`,
 `test/`, `tools/`, `jni/jni.cpp`, `docker/`, the build scripts, and the documents
-under `docs/`. Three things it does **not** cover:
+under `docs/`. Four things it does **not** cover:
 
 - **The bundled font**, `assets/fonts/BetterTimelapseCjkSC-Regular.ttf`, is a subset
   of Sarasa Gothic and carries its own licence, which is included beside it
@@ -37,6 +37,17 @@ under `docs/`. Three things it does **not** cover:
   its own licence. It is a build-time dependency and is not vendored into this
   repository.
 - **The old app's behaviour**, analysed at length in `docs/PAIN-POINTS.md`, belongs
-  to [TimeLapse](https://github.com/jonasjuffinger/TimeLapse). No code from it is
-  used here: the analysis is of its behaviour and design, with file and line
-  references, and the old app is not part of this repository.
+  to [TimeLapse](https://github.com/jonasjuffinger/TimeLapse) (MIT, © 2017 Jonas
+  Juffinger). No code from it is used here: the analysis is of its behaviour and
+  design, with file and line references, and the old app is not part of this
+  repository.
+- **The engineering practice**, the build arrangement, the font-subsetting method
+  and the decision-class discipline come from
+  [Recipe Lab](https://github.com/voxivoid/recipe-lab-sony-pmca) (MIT, © 2026 André
+  Domingues). Again no code is shared; Recipe Lab is a separate application with a
+  different purpose, and it is likewise not part of this repository.
+
+Both of those projects are acknowledged in the README, along with
+[Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE) and
+[OpenMemories](https://github.com/ma1co/OpenMemories-Framework), without which no
+third-party app could be built for these cameras at all.
