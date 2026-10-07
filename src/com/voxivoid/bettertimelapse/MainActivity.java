@@ -98,9 +98,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** Whether this run has already been told that most of its frames are not reaching the card. */
     private boolean shortfallSaid;
 
-    /** How many times the device dump has been attempted this launch. */
-    private int dumpAttempts;
-
     /** The press window the current frame was given, and the body's callback for it, for the log. */
     private long pressWindowUsedMs;
 
@@ -166,7 +163,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private long cardNewestStamp;
     private String cardNewestPath = "";
     private long cardNewestBytes;
-    private String cardRoots = "";
     private String cardRoot = "";
 
     /** The count as of the previous walk: the difference between the two is what the card gained. */
@@ -327,10 +323,17 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // Remembered for onReturn: the run cannot survive the camera being released, and a run that
         // silently stops being driven is worse than one that ends and says so.
         runInterrupted = engine.midRun();
-        // Leaving for good? Then the camera goes back the way it was found (docs/DECISIONS.md A10).
-        if (isFinishing()) restoreCameraSettings();
+        // Leaving for good? Then the camera goes back the way it was found (docs/DECISIONS.md A10), and the
+        // exit is written down: "the app was left mid-something" is a claim a log has to be able to support,
+        // and the camera asking to repair its card data after some sessions is what it is there to explain.
+        if (isFinishing()) {
+            restoreCameraSettings();
+            log(LogLines.exit(engine.midRun(), engine.landed(), camera.previewing()));
+        }
         camera.clearShutterListener();
-        camera.release();
+        // No `release()` here any more: it means "let go of the shutter and start the preview again", which is
+        // the opposite of what leaving is. `close()` stops the stream, cancels a capture that is still open and
+        // then releases the handle, in that order.
         camera.close();
         super.onPause();
     }
@@ -385,90 +388,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     };
 
     /**
-     * Write what the camera says about itself to a file on the card.
-     *
-     * <p>For the question the screen cannot hold: whether this body exposes a shutter speed, and under what
-     * name. {@code parameterKeys()} has been filtering the live parameters for a {@code shutter} key since
-     * the skeleton and had no caller — there was nowhere to put an answer several screens long. Now there
-     * is, and the two questions that matter for the minimum interval (the exposure, and what the body says
-     * it can do) can be answered from data instead of from reasoning.
-     *
-     * <p>A write that fails is reported on the panel: a diagnostic file nobody can find is worse than none.
-     */
-    private void writeDeviceDump() {
-        dumpAttempts++;
-        String written = DevDump.write(this, deviceReport());
-        if (written.length() == 0) {
-            // Nothing on the card would take it. There is no adb on this camera and no way to pull an app's
-            // private files, so the reason has to fit on one line — and the answer to the question the dump
-            // was written for goes on the panel by itself, because a photograph of it is then the only way
-            // this data leaves the camera.
-            panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5199\u4e0d\u8fdb\u53bb\uff1a"      // 设备清单写不进去：
-                    + DevDump.attempts() + "  " + DevDump.probe(this));
-        } else if (!DevDump.onCard()) {
-            // It landed in private storage, which on this camera cannot be retrieved at all: no adb, and
-            // pmca-console has no command that pulls an app's files. So the panel carries both halves of what
-            // the file was for — why every place on the card refused it, and the keys that could answer the
-            // question it was written for.
-            panel.setEvidence("\u5361\u4e0a\u5199\u4e0d\u8fdb\uff08" + DevDump.attempts()      // 卡上写不进（
-                    + "\uff09  " + DevDump.probe(this));                                      // ）
-        } else {
-            // Success is quiet on the screen: the path is in the log, and the file is on the card where the
-            // reader can be pointed at it.
-            log("dump path=" + written);
-        }
-    }
-
-    /**
      * What the camera says about itself, as text.
      *
      * <p>Written to the card when the card will take it, and readable on the panel at any time (hold MENU):
      * the answers are several screens long, this camera has no adb, and it will not let an app write where a
      * computer can read. A photograph of a screen is a poor channel, but it is the one that works.
      */
-    private String deviceReport() {
-        Plan plan = engine.plan();
-        StringBuilder b = new StringBuilder();
-        b.append("# better-timelapse device report\n");
-        b.append("# what the camera says about itself. Hold MENU to read it on the panel;\n");
-        b.append("# the question it exists for: can this app read the shutter speed?\n");
-        b.append("\n[identity]\n");
-        b.append("model.name       = ").append(SonyCamera.property("model.name")).append('\n');
-        b.append("version.platform = ").append(SonyCamera.property("version.platform")).append('\n');
-        b.append("preview          = ").append(camera.previewing() ? "running" : "not running").append('\n');
-        b.append("preview.problem  = ").append(camera.previewProblem()).append('\n');
-        b.append("\n[the exposure family: name = value]\n");
-        b.append(camera.exposureReport()).append('\n');
-        b.append("\n[settings this app can read back]\n");
-        b.append("silent-shutter-mode = ").append(camera.silentShutterHeld()).append('\n');
-        b.append("drive-mode          = ").append(camera.driveModeHeld()).append('\n');
-        b.append("\n[keys that could carry a shutter or exposure setting]\n");
-        b.append(camera.parameterKeys()).append('\n');
-        b.append("\n[every live parameter, as the camera reports it]\n");
-        b.append(camera.parametersFlat()).append('\n');
-        b.append("\n[camera capabilities]\n");
-        b.append(camera.capabilities().summary(camera.previewing())).append('\n');
-        b.append("\n[CameraEx methods]\n");
-        b.append(camera.cameraExMethods()).append('\n');
-        b.append("\n[parameter modifier methods]\n");
-        b.append(camera.modifierMethods()).append('\n');
-        // The display API, asked of the body rather than taken from the old app's source: whether the panel can
-        // be switched off is the only part of the 关屏 row that a camera can answer.
-        b.append("\n[display output, for the panel-off row]\n");
-        b.append(screen.apiReport()).append('\n');
-        b.append("\n[the plan in force]\n");
-        b.append("interval=").append(plan.intervalMs())
-                .append(" frames=").append(plan.frames())
-                .append(" delay=").append(plan.delayMs())
-                .append(" settle=").append(plan.settleMs())
-                .append(" silent=").append(plan.get(Plan.ROW_SILENT))
-                .append(" drive=").append(plan.driveMode())
-                .append(" ael=").append(plan.get(Plan.ROW_AEL))
-                .append(" panelOff=").append(plan.get(Plan.ROW_PANEL_OFF)).append('\n');
-        b.append("shortest.interval=").append(body.shortestIntervalMs(plan)).append('\n');
-        b.append("body.busy.lower.bound=").append(body.lowerBoundMs()).append('\n');
-        return b.toString();
-    }
 
     /**
      * Try the dump again, if it never reached the card.
@@ -480,13 +405,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * spread out: at open, after the first successful card walk, and when a run begins. Bounded, because a
      * diagnostic that keeps retrying forever is its own kind of noise.
      */
-    private void retryDeviceDump() {
-        if (DevDump.onCard() || dumpAttempts >= DUMP_ATTEMPTS_MAX) return;
-        // Six card paths, six failures, every one of them an open() on the card: worth doing, not worth doing
-        // while a run is trying to keep time.
-        if (engine.midRun()) return;
-        writeDeviceDump();
-    }
 
     /** How much of the session log the panel's reader shows. */
     private static final int LOG_TAIL_LINES = 80;
@@ -554,7 +472,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         callbackHintMs = 0;
         seedPlanFromCamera();
         applyPlanToCamera();
-        writeDeviceDump();
     }
 
     /**
@@ -621,8 +538,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // This one disables every setting above at once, so it goes on the evidence line.
             panel.setEvidence("\u53c2\u6570\u4fee\u9970\u5668\u4e0d\u53ef\u7528\uff1a" + problem);  // 参数修饰器不可用
         } else if (failed.length() > 0) {
-            panel.setEvidence("\u672a\u751f\u6548\uff1a" + failed.toString().trim() + "\uff08"  // 未生效
-                    + camera.modifierMethods().length() + " \u4e2a\u53ef\u7528\u65b9\u6cd5\uff09");  // 个可用方法
+            panel.setEvidence("\u672a\u751f\u6548\uff1a" + failed.toString().trim());  // 未生效：
         }
         panel.setCameraNote(camera.capabilities().summary(camera.previewing()));
     }
@@ -707,9 +623,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         Session.line(this, "app " + appIdentity()
                 + "\n" + "boot firstframe=" + LogLines.ms(startupMs)
                         + " font=" + LogLines.text(UiFont.route(), "?")
-                + "\n" + "paths log=" + LogLines.text(Session.path(), "-")
-                        + " dump=" + LogLines.text(DevDump.written(), "-")
-                        + " carddump=" + (DevDump.onCard() ? "yes" : "no"));
+                + "\n" + "paths log=" + LogLines.text(Session.path(), "-"));
         if (Session.broken()) {
             // The one thing about the log the user has to know while standing at the camera.
             panel.setLogNote("\u65e5\u5fd7\u5199\u4e0d\u8fdb\uff1a"                     // 日志写不进：
@@ -1259,13 +1173,44 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * unaccounted for until it answers, which is the truth about them.
      */
     private void walkCard() {
+        look(false);
+    }
+
+    /**
+     * The verdict's look at the card: one directory, not the whole tree.
+     *
+     * <p>The full walk is what answers "how many images does this card hold", and it costs a few thousand
+     * filesystem calls through the camera's storage stack. A verdict only needs to know whether a file
+     * appeared. So the cheap look runs on every verdict and the full walk runs when it has said no a few
+     * times in a row -- a handful of frames at most -- which is the case it exists for: a card that has
+     * stopped growing, or a camera that has moved to a new roll directory.
+     */
+    private void pollCard() {
+        look(true);
+    }
+
+    /** How many cheap looks in a row are allowed before the full walk is owed. */
+    private static final int POLLS_BEFORE_WALK = 3;
+
+    /** How many have been spent. Reset by any full walk and by any look that found something. */
+    private int pollsSinceWalk;
+
+    private void look(final boolean cheap) {
         if (walking) return;
         walking = true;
+        final boolean full = !cheap || pollsSinceWalk >= POLLS_BEFORE_WALK;
         new Thread(new Runnable() {
             @Override
             public void run() {
                 long beganMs = now();
-                card.refresh();
+                boolean found = false;
+                if (full) {
+                    card.refresh();
+                } else {
+                    found = card.poll();
+                }
+                walkCheap = !full;
+                walkFound = found;
                 walkMs = now() - beganMs;
                 // The hand-off. Card is written by this thread and read by the UI thread only after
                 // this post: the message queue is the memory barrier between the two.
@@ -1273,6 +1218,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             }
         }, "card-walk").start();
     }
+
+    /** Whether the look that just came back was the cheap one, and whether it found a new file. */
+    private boolean walkCheap;
+    private boolean walkFound;
 
     private final Runnable onCardRead = new Runnable() {
         @Override
@@ -1289,10 +1238,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // the same tree — five directory walks per frame for a diagnostic that only changes when the
             // root does. It is taken again when that happens, and not otherwise.
             String rootNow = card.rootInUse();
-            if (cardRoots.length() == 0 || !rootNow.equals(cardRoot)) {
-                cardRoot = rootNow;
-                cardRoots = card.rootsReport();
-            }
+            if (!rootNow.equals(cardRoot)) cardRoot = rootNow;
 
             if (cardCount != Frames.UNKNOWN) sawCard = true;
             if (cardNewestBytes > 0) measuredFrameBytes = cardNewestBytes;
@@ -1321,7 +1267,6 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             }
             logCard();
             logSummary();
-            retryDeviceDump();
             panel.invalidate();
         }
     };
@@ -1343,12 +1288,17 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         int gained = cardCount - lastWalkCount;
         lastWalkCount = cardCount;
         lastGained = gained;
+        // A cheap look that found a file earned another cheap look; one that found nothing is what the full
+        // walk is for, so the budget is only reset by a full walk or by a hit.
+        if (!walkCheap || gained > 0) pollsSinceWalk = 0;
+        else pollsSinceWalk++;
         int accounted = Frames.framesAccounted(gained, engine.plan());
         int open = engine.unverified();
         if (accounted > open) accounted = open;
         for (int i = 0; i < accounted; i++) engine.accountFor();
         if (engine.landed() > 0) {
-            log(LogLines.verdict(engine.fired(), cardCount, gained, accounted > 0, walkMs));
+            log(LogLines.verdict(engine.fired(), cardCount, gained, accounted > 0, walkMs)
+                    + " look=" + (walkCheap ? "poll" : "walk"));
         }
     }
 
@@ -1444,7 +1394,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     private final Runnable onVerdict = new Runnable() {
         @Override
         public void run() {
-            walkCard();
+            pollCard();
         }
     };
 
@@ -1734,8 +1684,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         startOverride = false;
                         handler.removeCallbacks(onOverrideExpiry);
                         shortfallSaid = false;
-                        retryDeviceDump();
-                        refreshExposure();
+                                    refreshExposure();
                         applyPlanToCamera();
                         // Held back once when the plan asks for more than this body has: the reason goes on the
                         // screen, the second press goes ahead, and the file records which of the two it was.
@@ -1926,11 +1875,11 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         public void run() {
             if (menu.fire() != Keys.Hold.HOLD) return;
             if (!engine.midRun()) {
-                // The device report, and the run so far: the two things worth several screens, and the only
-                // way to read either of them on a camera that will not let a computer at its app's files.
+                // The session log, which is the one record this project kept when it threw the rest of its
+                // diagnostics away: on a camera that will not let a computer at its app's files, this is how a
+                // run is read without pulling the card.
                 String tail = Session.tail(LOG_TAIL_LINES);
-                panel.showText(deviceReport()
-                        + "\n\n[the session log, last " + LOG_TAIL_LINES + " lines]\n"
+                panel.showText("[the session log, last " + LOG_TAIL_LINES + " lines]\n"
                         + LogLines.text(Session.path(), "(no log)") + "\n"
                         + (tail.length() == 0 ? "(nothing written yet)" : tail));
             }

@@ -351,6 +351,23 @@ public final class LogLines {
         return "preview action=" + text(action, "?") + " why=" + text(why, "?");
     }
 
+    /**
+     * The app going away, and what state the camera was in when it did.
+     *
+     * <p>Not a summary — a run has its own. This is the teardown, written before the camera is closed, and it
+     * exists because the camera has been asking to repair its card data after some sessions: a file that says
+     * whether the app left cleanly is the difference between diagnosing that and guessing at it.
+     *
+     * @param midRun whether a run was still in progress, which is the one state a clean exit cannot have.
+     * @param landed frames taken this run, for context.
+     * @param previewing whether the preview stream was still running at the exit.
+     */
+    public static String exit(boolean midRun, int landed, boolean previewing) {
+        return "exit midrun=" + (midRun ? "yes" : "no")
+                + " landed=" + landed
+                + " preview=" + (previewing ? "running" : "stopped");
+    }
+
     /** The frames the card never answered for, said in the file the way the panel says it on screen. */
     public static String shortfall(int taken, int accounted) {
         return "shortfall taken=" + taken + " accounted=" + accounted;

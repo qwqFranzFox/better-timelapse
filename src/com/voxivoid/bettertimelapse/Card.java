@@ -76,19 +76,6 @@ public final class Card {
     /** The root that last produced images, or {@code null} when none has. */
     private String rootInUse;
 
-    /** Every root that exists, and how many images each holds. For the diagnostic line. */
-    public String rootsReport() {
-        StringBuilder b = new StringBuilder();
-        for (int i = 0; i < ROOTS.length; i++) {
-            File root = root(i);
-            if (root == null) continue;
-            File dcim = new File(root, DCIM);
-            if (!dcim.exists()) continue;
-            if (b.length() > 0) b.append(' ');
-            b.append(root.getPath()).append('=').append(countImages(dcim));
-        }
-        return b.length() == 0 ? "no DCIM under any known root" : b.toString();
-    }
 
     private static File root(int i) {
         if (ROOTS[i] == null) {
@@ -145,6 +132,54 @@ public final class Card {
         newestName = walkName;
         newestPath = walkPath;
         newestBytes = walkBytes;
+    }
+
+    /**
+     * A cheap look at the one directory the camera is writing into, instead of the whole card.
+     *
+     * <p>{@link #refresh()} recurses the entire DCIM tree and stats every file in it — directory test, name
+     * test, modification time, length — once per frame. On a card holding a few hundred images that is a few
+     * thousand filesystem calls through the camera's storage stack every interval, and the user reported what
+     * it feels like from the other side: with every diagnostic this app has accumulated, the whole thing was
+     * sluggish, and the walk is by far the heaviest thing it does.
+     *
+     * <p>What a verdict actually needs is one bit: did the camera write a file since the last look. The
+     * camera writes into one roll directory at a time and only moves on when that fills, so listing that one
+     * directory answers it — and a full {@link #refresh()} is still what runs when the answer is no for a few
+     * frames in a row, which is how a roll change or a write somewhere unexpected gets noticed.
+     *
+     * @return whether a file appeared that this app had not seen.
+     */
+    public boolean poll() {
+        if (newestPath == null || newestPath.length() == 0) return false;
+        File file = new File(newestPath);
+        File dir = file.getParentFile();
+        if (dir == null) return false;
+        File[] files = dir.listFiles();
+        if (files == null) return false;
+        long stamp = 0;
+        String name = "";
+        String path = "";
+        long bytes = 0;
+        for (int i = 0; i < files.length; i++) {
+            File f = files[i];
+            if (f.isDirectory() || !isImage(f.getName())) continue;
+            long modified = f.lastModified();
+            if (modified >= stamp) {
+                stamp = modified;
+                name = f.getName();
+                path = f.getPath();
+                bytes = f.length();
+            }
+        }
+        if (stamp <= newestStamp) return false;
+        if (stamp == newestStamp && name.equals(newestName)) return false;
+        newestStamp = stamp;
+        newestName = name;
+        newestPath = path;
+        newestBytes = bytes;
+        count++;
+        return true;
     }
 
     /** How many images the card holds, or {@link Frames#UNKNOWN}. */

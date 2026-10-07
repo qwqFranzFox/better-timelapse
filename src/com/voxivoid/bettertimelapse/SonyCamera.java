@@ -152,6 +152,24 @@ public final class SonyCamera {
         reviewControl = null;
         reviewMode = "";
         if (instance == null) return;
+        // The camera goes back in the order it was taken, which is what a teardown is:
+        //
+        //   1. stop the preview stream -- the body's heaviest activity, and the one thing that keeps the
+        //      imaging pipeline running after this app has stopped asking for frames;
+        //   2. cancel any capture still in flight, so a half-taken frame is not left open on the card;
+        //   3. release the CameraEx handle itself.
+        //
+        // This used to be `release()` on the handle and nothing else, and `release()` here means "let go of
+        // the shutter, start the preview again" -- so the last thing the app did to the camera was restart a
+        // stream it was about to abandon. The user's camera has been asking to repair its card data after
+        // some sessions; a stream and a half-open capture left behind is exactly the kind of unfinished
+        // business that leaves a card looking dirty, and it costs nothing to close properly.
+        stopPreview();
+        try {
+            instance.getClass().getMethod("cancelTakePicture").invoke(instance);
+        } catch (Throwable t) {
+            // No capture in flight, or a body without the call: nothing to cancel.
+        }
         try {
             instance.getClass().getMethod("release").invoke(instance);
         } catch (Throwable t) {
@@ -613,8 +631,7 @@ public final class SonyCamera {
             Object made = tryModifier(names[i], new Class<?>[0], new Object[0]);
             if (made != null) return made;
         }
-        // Nothing worked. Record what the class actually offers, so the next round is not a guess.
-        modifierProblem = "no factory matched; CameraEx methods: " + cameraExMethods();
+        modifierProblem = "no createParametersModifier factory matched";
         return null;
     }
 
@@ -641,47 +658,6 @@ public final class SonyCamera {
         }
     }
 
-    /**
-     * Every method the body's CameraEx actually declares, in order, so a missing call can be replaced
-     * by the one that exists instead of by another guess.
-     */
-    public String cameraExMethods() {
-        if (cameraEx == null) return "(no camera)";
-        StringBuilder b = new StringBuilder();
-        try {
-            java.lang.reflect.Method[] methods = cameraEx.getClass().getMethods();
-            java.util.Arrays.sort(methods, new java.util.Comparator<java.lang.reflect.Method>() {
-                @Override
-                public int compare(java.lang.reflect.Method a, java.lang.reflect.Method c) {
-                    return a.getName().compareTo(c.getName());
-                }
-            });
-            // Only the names that could plausibly carry a parameter modifier, plus a count of the
-            // rest. A full dump of every method would wrap past the screen and bury the answer.
-            int others = 0;
-            for (java.lang.reflect.Method m : methods) {
-                if (m.getDeclaringClass() == Object.class) continue;
-                String name = m.getName();
-                String lower = name.toLowerCase(java.util.Locale.US);
-                if (lower.indexOf("param") < 0 && lower.indexOf("modif") < 0
-                        && lower.indexOf("silent") < 0) {
-                    others++;
-                    continue;
-                }
-                b.append(name).append('(');
-                Class<?>[] p = m.getParameterTypes();
-                for (int i = 0; i < p.length; i++) {
-                    if (i > 0) b.append(',');
-                    b.append(p[i].getSimpleName());
-                }
-                b.append(") ");
-            }
-            b.append("| ").append(others).append(" other methods");
-        } catch (Throwable t) {
-            b.append("(listing failed: ").append(shortName(t)).append(')');
-        }
-        return b.toString();
-    }
 
 
     /** Why the parameter modifier is unavailable; empty when it is. */
@@ -707,7 +683,7 @@ public final class SonyCamera {
         if (applyModifierWith(mod, "applyParameters", new Class<?>[] { android.hardware.Camera.Parameters.class })) return;
         if (applyModifierWith(mod, "applyParameters", new Class<?>[] { android.hardware.Camera.class })) return;
         if (applyModifierWith(mod, "apply", new Class<?>[0])) return;
-        modifierProblem = "no apply method worked; modifier methods: " + modifierMethods();
+        modifierProblem = "no applyParameters/apply method worked";
     }
 
     private boolean applyModifierWith(Object mod, String name, Class<?>[] types) {
@@ -878,90 +854,7 @@ public final class SonyCamera {
     }
 
 
-    /**
-     * Every parameter name the body reports, from {@code Camera.Parameters.flatten()}. Guessing these
-     * is what turned "silent shutter" into a dead setting: the names are the camera's, not the SDK's.
-     */
-    /**
-     * Every live parameter, exactly as the camera reports it.
-     *
-     * <p>The unfiltered answer to "what will this body tell us about itself", for the device dump. The
-     * filtered version below is what fits on a screen; a key nobody thought to look for only shows up here.
-     */
-    public String parametersFlat() {
-        if (camera == null) return "(no camera)";
-        try {
-            String flat = camera.getParameters().flatten();
-            if (flat == null) return "(no parameters)";
-            // One per line: flatten() uses ';' and the values contain commas, so this is the readable form.
-            return flat.replace(";", "\n");
-        } catch (Throwable t) {
-            return "(flatten failed: " + shortName(t) + ")";
-        }
-    }
 
-    public String parameterKeys() {
-        if (camera == null) return "(no camera)";
-        try {
-            android.hardware.Camera.Parameters params = camera.getParameters();
-            String flat = params.flatten();
-            if (flat == null) return "(no parameters)";
-            String[] lines = flat.split(";");
-            StringBuilder b = new StringBuilder();
-            int matched = 0;
-            for (int i = 0; i < lines.length; i++) {
-                String line = lines[i];
-                int eq = line.indexOf('=');
-                String key = eq > 0 ? line.substring(0, eq) : line;
-                String lower = key.toLowerCase(java.util.Locale.US);
-                if (interestingKey(lower)) {
-                    b.append(key).append(' ');
-                    matched++;
-                }
-            }
-            // How many keys there are in total, not only how many matched: it says whether reading the whole
-            // list off the screen is a page or a book, which is what decides how the next question gets asked.
-            return "(" + lines.length + " keys, " + matched + ") " + (b.length() == 0 ? "" : b.toString()).trim();
-        } catch (Throwable t) {
-            return "(flatten failed: " + shortName(t) + ")";
-        }
-    }
-
-    /**
-     * The keys that could hold the exposure itself, with their values, and nothing else.
-     *
-     * <p>298 parameters were reported by this body and 85 matched the first filter — far more than a panel
-     * line holds, and the file that could have carried the rest cannot be read back on this camera. So this
-     * is the narrow list: the exposure family only, with values, because a key's <em>name</em> says what the
-     * camera offers while its value says what it currently is — and a {@code -values} list would name the
-     * settings the exposure can take.
-     */
-    public String exposureReport() {
-        if (camera == null) return "(no camera)";
-        try {
-            String flat = camera.getParameters().flatten();
-            if (flat == null) return "(no parameters)";
-            String[] lines = flat.split(";");
-            StringBuilder b = new StringBuilder();
-            int shown = 0, matched = 0;
-            for (int i = 0; i < lines.length; i++) {
-                int eq = lines[i].indexOf('=');
-                String key = eq > 0 ? lines[i].substring(0, eq) : lines[i];
-                String lower = key.toLowerCase(java.util.Locale.US);
-                if (!exposureKey(lower)) continue;
-                matched++;
-                if (shown >= EXPOSURE_KEYS_SHOWN) continue;
-                if (b.length() > 0) b.append(' ');
-                b.append(key);
-                if (eq > 0) b.append('=').append(shortValue(lines[i].substring(eq + 1)));
-                shown++;
-            }
-            String head = matched == 0 ? "\u65e0" : matched + "\u9879";                      // 无 / N项
-            return head + (matched > shown ? "(+" + (matched - shown) + ")" : "") + " " + b;
-        } catch (Throwable t) {
-            return "(flatten failed: " + shortName(t) + ")";
-        }
-    }
 
     /** A parameter value, cut to something that fits a panel line. */
     private static String shortValue(String value) {
@@ -1012,41 +905,6 @@ public final class SonyCamera {
         return caps;
     }
 
-    /**
-     * Every method this body's parameter modifier actually has, lower-cased, and the field names it
-     * exposes. The app reaches the camera by reflection with no stub jar to compile against, so the
-     * only trustworthy list of what exists is the one the camera hands back. Guessing method names
-     * from the old app's build files is how "silent shutter" ends up doing nothing.
-     */
-    public String modifierMethods() {
-        if (modifier == null) {
-            return modifierProblem.length() > 0
-                    ? "(no modifier: " + modifierProblem + ")"
-                    : "(no modifier)";
-        }
-        StringBuilder b = new StringBuilder();
-        try {
-            java.lang.reflect.Method[] methods = modifier.getClass().getMethods();
-            java.util.Arrays.sort(methods, new java.util.Comparator<java.lang.reflect.Method>() {
-                @Override
-                public int compare(java.lang.reflect.Method a, java.lang.reflect.Method c) {
-                    return a.getName().compareTo(c.getName());
-                }
-            });
-            for (java.lang.reflect.Method m : methods) {
-                if (m.getDeclaringClass() == Object.class) continue;
-                if (b.length() > 0) b.append(' ');
-                b.append(m.getName());
-            }
-            b.append(" || fields:");
-            for (java.lang.reflect.Field f : modifier.getClass().getFields()) {
-                b.append(' ').append(f.getName());
-            }
-        } catch (Throwable t) {
-            b.append("(listing failed: ").append(shortName(t)).append(')');
-        }
-        return b.toString();
-    }
 
     private Boolean supports(String method) {
         try {
