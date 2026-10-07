@@ -166,14 +166,51 @@ public final class LogLines {
      */
     public static String summary(String outcome, int landed, int accounted, int skipped, int unverified,
             long elapsedMs, int cardGain) {
+        return summary(outcome, landed, accounted, skipped, unverified, elapsedMs, cardGain,
+                null, 0);
+    }
+
+    /**
+     * The same line, with the film's own timeline measured from the frames that were actually taken.
+     *
+     * <p>{@code elapsed} is the run's wall clock and starts at the button, so it carries the delay before the
+     * first frame and every pause. What a viewer of the finished film measures is something else: the distance
+     * from the first frame to the last, which is the timeline the photographs land on and the only place the
+     * interval this app promises can be checked against the interval it delivered — {@code mean=} is that
+     * distance divided by the gaps, and it is what a renderer will reproduce.
+     *
+     * <p>A 20-frame run at 5 s reported {@code elapsed=98.882s}: 94.948 s of film (19 gaps,
+     * {@code mean=4997ms} — the timetable ran 2.7 ms a frame tight) behind 3.934 s of dead time before the
+     * first frame. Both numbers are true and only one of them is about the film.
+     *
+     * @param shotTimesMs the frames' own times, as {@link Schedule} keeps them, or {@code null}.
+     * @param shotCount how many of them are real: the array is preallocated for a whole night.
+     */
+    public static String summary(String outcome, int landed, int accounted, int skipped, int unverified,
+            long elapsedMs, int cardGain, long[] shotTimesMs, int shotCount) {
+        long spanMs = spanMs(shotTimesMs, shotCount);
+        long meanMs = Schedule.meanInterval(shotTimesMs == null ? new long[0] : shotTimesMs, shotCount);
         StringBuilder b = new StringBuilder("summary outcome=").append(text(outcome, "done"));
         b.append(" landed=").append(landed);
         b.append(" verified=").append(accounted);
         b.append(" missed=").append(unverified);
         b.append(" card=").append(cardGain == Frames.UNKNOWN ? "?" : signed(cardGain));
         b.append(" skipped=").append(skipped);
+        b.append(" span=").append(spanMs == Frames.UNKNOWN ? "?" : rel(spanMs).substring(1));
+        b.append(" mean=").append(meanMs == 0 ? "?" : ms(meanMs));
         b.append(" elapsed=").append(rel(elapsedMs).substring(1));
         return b.toString();
+    }
+
+    /**
+     * The film's own length: from the first frame that was taken to the last.
+     *
+     * <p>Not the run's elapsed time, and not the plan's promised total: a run whose first frame waited three
+     * seconds has three seconds of dead time in {@code elapsed} that no viewer of the film will ever see.
+     */
+    public static long spanMs(long[] shotTimesMs, int shotCount) {
+        if (shotTimesMs == null || shotCount < 2 || shotCount > shotTimesMs.length) return Frames.UNKNOWN;
+        return shotTimesMs[shotCount - 1] - shotTimesMs[0];
     }
 
     /** A count that is allowed to say which way it moved: {@code +20}, {@code -3}, {@code 0}. */

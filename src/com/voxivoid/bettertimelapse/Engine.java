@@ -176,6 +176,17 @@ public final class Engine {
         return Schedule.meanInterval(shotTimesMs, landed);
     }
 
+    /**
+     * The frames' own times, with the number that are real, for the log's retrospective view of the run.
+     *
+     * <p>The same array {@link #meanIntervalMs()} measures and {@link #driftMs()} compares against the plan, so
+     * the summary's film length and the panel's drift cannot disagree: they are two readings of one record. The
+     * array is preallocated for a whole night, which is why the count travels with it.
+     */
+    public long[] shotTimesMs() {
+        return shotTimesMs;
+    }
+
     public long driftMs() {
         return Schedule.driftMs(meanIntervalMs(), plan);
     }

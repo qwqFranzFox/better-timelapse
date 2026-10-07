@@ -1334,7 +1334,8 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         summaryLogged = true;
         String outcome = paused ? "paused" : (engine.state() == Engine.DONE ? "done" : "fault");
         log(LogLines.summary(outcome, engine.landed(), confirmed(), engine.skipped(),
-                engine.unverified(), runStartMs(), cardGain()));
+                engine.unverified(), runStartMs(), cardGain(),
+                engine.shotTimesMs(), engine.landed()));
     }
 
     /**

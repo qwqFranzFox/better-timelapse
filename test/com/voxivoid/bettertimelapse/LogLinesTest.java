@@ -177,6 +177,28 @@ class LogLinesTest {
     }
 
     @Test
+    void theSummaryMeasuresTheFilmAndNotJustTheRun() {
+        // The 20-frame run at 5s wrote `elapsed=98.882s`, which starts at the button: 3.934s of it was dead
+        // time before the first frame. The film is 94.948s long with 19 gaps, and that is the timeline a
+        // renderer reproduces -- 4997ms a frame, 2.7ms a frame tight against the 5000ms asked for.
+        long origin = 1_000_000;
+        long[] shots = new long[20];
+        for (int i = 0; i < shots.length; i++) shots[i] = origin + 2568 + i * 4997L;
+
+        String line = LogLines.summary("done", 20, 20, 0, 0, 98_882, 20, shots, 20);
+        assertTrue(line.contains("span=94.943s"), line);
+        assertTrue(line.contains("mean=4997ms"), line);
+        assertTrue(line.contains("elapsed=98.882s"), line);
+
+        // Fewer than two frames is not a film: an unknown span, not a zero one, so it cannot be read as
+        // "the run took no time".
+        assertTrue(LogLines.summary("done", 1, 1, 0, 0, 5000, 1, shots, 1).contains("span=? "));
+        assertTrue(LogLines.summary("done", 1, 1, 0, 0, 5000, 1, shots, 1).contains("mean=? "));
+        // A count larger than the array must not read past its end.
+        assertEquals(Frames.UNKNOWN, LogLines.spanMs(shots, 21));
+    }
+
+    @Test
     void theLogNamesWhichClockIsWhich() {
         // A press and a moment are different counters, and the first real log mixed them: four skips and one
         // shot of a five-frame plan could not be told apart from five frames.
