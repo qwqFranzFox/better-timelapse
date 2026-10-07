@@ -287,37 +287,30 @@ public final class Hud {
     }
 
     /**
-     * A countdown as a bar of characters, for the one-line panel.
+     * How much of the wait to the next frame has gone by, from {@code 0} to {@code 1}.
      *
-     * <p>The single-line mode shows a number and nothing else, and a number is the wrong shape for "how long
-     * until the next frame": the question a person glancing at a camera at night is asking is "is it close",
-     * and a bar answers that without being read. Drawn from characters rather than rectangles so that the
-     * arithmetic can be checked off the camera, like every other decision in this file — the panel only paints
-     * the string.
+     * <p>The single-line panel draws this as a bar, and the bar is drawn as a filled rectangle rather than
+     * from characters. That is not a style choice: the panel uses a CJK font, in which {@code #} and {@code .}
+     * are not the same width -- so a character bar is ragged, and the first version of it was. Geometry has no
+     * such problem.
      *
-     * <p>{@code '#'} is elapsed and {@code '.'} is remaining, so the bar fills up rather than draining: a
-     * screen that goes dark as the frame approaches reads as losing time, not as approaching a frame.
+     * <p>The fraction is here rather than in {@code PanelView} because this is the part that can be wrong (an
+     * interval of zero, a frame already late, a negative remaining time) and {@code PanelView} cannot be run off
+     * the camera. The panel does nothing but multiply two numbers by it.
      *
      * @param remainingMs how long until the next frame, or {@link Schedule#NONE} when none is due.
-     * @param cells how many characters the bar may use, brackets included.
-     * @param intervalMs the whole wait the bar is a fraction of; {@link Frames#UNKNOWN} or less draws nothing.
+     * @param intervalMs the whole wait the fraction is of.
+     * @return {@code 0} before anything has elapsed, {@code 1} when the moment is here or past, and
+     *     {@link Frames#UNKNOWN} when there is no bar to draw at all.
      */
-    public static String countdownBar(long remainingMs, int cells, long intervalMs) {
-        if (remainingMs == Schedule.NONE || intervalMs <= 0) return "";
-        if (cells < 4) cells = 4;
-        int inner = cells - 2;
-        long left = Math.max(0, Math.min(remainingMs, intervalMs));
-        int elapsed = (int) Math.round((double) (intervalMs - left) * inner / intervalMs);
-        if (elapsed < 0) elapsed = 0;
-        if (elapsed > inner) elapsed = inner;
-        StringBuilder b = new StringBuilder(cells);
-        b.append('[');
-        for (int i = 0; i < inner; i++) b.append(i < elapsed ? '#' : '.');
-        b.append(']');
-        return b.toString();
+    public static float countdownFraction(long remainingMs, long intervalMs) {
+        if (remainingMs == Schedule.NONE || intervalMs <= 0) return Frames.UNKNOWN;
+        if (remainingMs <= 0) return 1f;                       // the moment is here, or it is late
+        if (remainingMs >= intervalMs) return 0f;              // the wait has not started
+        return (float) (intervalMs - remainingMs) / (float) intervalMs;
     }
 
-    /** The progress line: frames taken against the plan, and how long the run has been going. */
+    /** The progress line: frames taken against the plan, and how long the run has been going. */    /** The progress line: frames taken against the plan, and how long the run has been going. */
     public static String progressLine(int landed, int planned, int accounted, int unverified,
             int skipped, long elapsedMs) {
         String of;

@@ -167,18 +167,17 @@ class HudTest {
     }
 
     @Test
-    void theCountdownBarFillsUpAsTheFrameApproaches() {
-        // The one-line mode's whole point is to be read at a glance, so the bar is drawn from characters here
-        // where the arithmetic can be checked without a camera -- the panel only paints the string.
-        assertEquals("[..........]", Hud.countdownBar(10000, 12, 10000), "nothing elapsed yet");
-        assertEquals("[#####.....]", Hud.countdownBar(5000, 12, 10000), "half way");
-        assertEquals("[##########]", Hud.countdownBar(0, 12, 10000), "the moment is here");
-        // A frame that is already late stays full rather than running off the end.
-        assertEquals("[##########]", Hud.countdownBar(-500, 12, 10000), "late is still full");
-        assertEquals("", Hud.countdownBar(Schedule.NONE, 12, 10000), "no frame, no bar");
-        assertEquals("", Hud.countdownBar(1000, 12, 0), "no interval to be a fraction of");
-        // Too narrow: a four-cell bar is the floor, because a bar that cannot show one cell is not a bar.
-        assertEquals("[#.]", Hud.countdownBar(5000, 4, 10000));
-        assertEquals("[#.]", Hud.countdownBar(5000, 1, 10000), "a cell count below the floor is raised to it");
+    void theCountdownFractionFillsUpAsTheFrameApproaches() {
+        // The one-line panel draws this fraction as a filled rectangle, and the fraction itself is here so it
+        // can be checked off the camera -- the edge cases are the ones that were wrong before: an interval of
+        // zero, a frame already late, a wait that has not started.
+        assertEquals(0f, Hud.countdownFraction(10_000, 10_000), 0.0001f, "nothing elapsed yet");
+        assertEquals(0.5f, Hud.countdownFraction(5_000, 10_000), 0.0001f, "half way");
+        assertEquals(1f, Hud.countdownFraction(0, 10_000), 0.0001f, "the moment is here");
+        assertEquals(1f, Hud.countdownFraction(-500, 10_000), 0.0001f, "late is still full");
+        assertEquals(0f, Hud.countdownFraction(20_000, 10_000), 0.0001f, "a wait longer than the interval");
+        assertEquals(Frames.UNKNOWN, Hud.countdownFraction(Schedule.NONE, 10_000), 0.0001f, "no frame, no bar");
+        assertEquals(Frames.UNKNOWN, Hud.countdownFraction(1_000, 0), 0.0001f, "no interval to be a fraction of");
+        assertEquals(Frames.UNKNOWN, Hud.countdownFraction(1_000, -5), 0.0001f, "a nonsense interval draws nothing");
     }
 }

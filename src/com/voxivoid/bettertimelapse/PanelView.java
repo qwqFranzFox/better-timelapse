@@ -541,14 +541,21 @@ public final class PanelView extends View {
             canvas.drawText(count, x, y, paint);
             x += paint.measureText(count) + padding * 2f;
             // The bar takes whatever room is left once the text it must not push off the screen has been
-            // measured. A glance at a camera at night asks "is it close", and a bar answers that without being
-            // read -- which is the whole reason this mode exists.
-            float cell = paint.measureText("0");
+            // measured, and it is drawn as rectangles rather than characters: the panel's font is a CJK one, in
+            // which '#' and '.' are not the same width, so a character bar comes out ragged. Geometry does not
+            // care what the font does.
             float room = w - padding - x - paint.measureText(rest) - padding * 2f;
-            String bar = Hud.countdownBar(next, (int) (room / cell), engine.plan().intervalMs());
-            if (bar.length() > 0) {
-                canvas.drawText(bar, x, y, paint);
-                x += paint.measureText(bar) + padding * 2f;
+            float track = Math.min(room, bigSize * 6f);
+            if (track >= smallSize * 3f) {                  // below this a bar says less than the number does
+                float barHeight = Math.max(2f, smallSize * 0.34f);
+                float top = y - smallSize * 0.62f;
+                float filled = track * Math.max(0f, Math.min(1f,
+                        Hud.countdownFraction(next, engine.plan().intervalMs())));
+                paint.setColor(colDim);
+                canvas.drawRect(x, top, x + track, top + barHeight, paint);
+                paint.setColor(colAccent);
+                canvas.drawRect(x, top, x + filled, top + barHeight, paint);
+                x += track + padding * 2f;
             }
         }
         if (x + paint.measureText(rest) <= w - padding) {
