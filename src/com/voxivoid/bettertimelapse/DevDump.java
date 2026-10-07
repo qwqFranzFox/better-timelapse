@@ -73,7 +73,7 @@ public final class DevDump {
                 attempts = summarise(reasons);
                 return written;
             }
-            reasons.add(shortReason(lastProblem));
+            reasons.add(label(context, file) + "=" + shortReason(lastProblem));
         }
         attempts = summarise(reasons);
         return "";
@@ -146,6 +146,42 @@ public final class DevDump {
         } catch (Throwable t) {
             return "?";
         }
+    }
+
+    /**
+     * The process's uid and supplementary groups, read from {@code /proc/self/status}.
+     *
+     * <p>Reported because the old TimeLapse app writes into a directory of its own at this card's root on
+     * this camera, with the same permissions declared, while every create this app attempts comes back
+     * ENOENT. When the same operation succeeds for one app and fails for another on the same path, what is
+     * left is who is asking: on this storage layer that is decided by uid and group membership (sdcard_rw is
+     * 1015, media_rw 1023), and neither is visible from the Java API.
+     */
+    private static String identity() {
+        String uid = "?", groups = "?";
+        java.io.BufferedReader reader = null;
+        try {
+            reader = new java.io.BufferedReader(new java.io.InputStreamReader(
+                    new java.io.FileInputStream("/proc/self/status")));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("Uid:")) {
+                    String[] parts = line.substring(4).trim().split("\\s+");
+                    if (parts.length > 0) uid = parts[0];
+                } else if (line.startsWith("Groups:")) {
+                    groups = line.substring(7).trim().replace(' ', ',');
+                }
+            }
+        } catch (Throwable t) {
+            groups = "?";
+        } finally {
+            try {
+                if (reader != null) reader.close();
+            } catch (Throwable t) {
+                // Nothing to do about a failed close on a file that is already read.
+            }
+        }
+        return "uid " + uid + " groups " + groups;
     }
 
     /** The card root as the filesystem resolves it, which is not always how it was spelled. */
@@ -309,9 +345,22 @@ public final class DevDump {
         }
     }
 
-    /** The interesting half of a Java IO message: "open failed: EACCES (Permission denied)" is noise. */
+    /**
+     * The interesting half of a Java IO message, as the name a systems person reads.
+     *
+     * <p>{@code No such file or directory} and {@code ENOENT} are the same fact, and the second one fits on
+     * a line next to five others. Which five matters: the paths are the other half of the answer, and the
+     * first version of this line reported only the reasons.
+     */
     private static String shortReason(String message) {
         if (message == null || message.length() == 0) return "failed";
+        String m = message.toLowerCase(java.util.Locale.US);
+        if (m.indexOf("no such file") >= 0) return "ENOENT";
+        if (m.indexOf("permission denied") >= 0) return "EACCES";
+        if (m.indexOf("read-only") >= 0) return "EROFS";
+        if (m.indexOf("no space") >= 0) return "ENOSPC";
+        if (m.indexOf("is a directory") >= 0) return "EISDIR";
+        if (m.indexOf("not a directory") >= 0) return "ENOTDIR";
         int bracket = message.indexOf('(');
         if (bracket > 0 && message.endsWith(")")) {
             return message.substring(bracket + 1, message.length() - 1);
@@ -319,25 +368,35 @@ public final class DevDump {
         return message;
     }
 
-    /** {@code reason (n) reason (n)}, commonest first, which is all that fits on one panel line. */
+    /** The directory an attempt went into, named the way it reads on the card. */
+    private static String label(Context context, File file) {
+        String parent = file.getParent();
+        if (parent == null) return "?";
+        String root = "";
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext != null) root = ext.getPath();
+        } catch (Throwable t) {
+            // No card root to strip; the full path is the label.
+        }
+        if (root.length() > 0 && parent.startsWith(root)) {
+            String rest = parent.substring(root.length());
+            return rest.length() == 0 ? "/" : rest.replace('\\', '/');
+        }
+        int slash = parent.lastIndexOf('/');
+        return slash >= 0 ? parent.substring(slash + 1) + "/" : parent;
+    }
+
+    /** One entry per failed place, which is what the panel has room for. */
     private static String summarise(List<String> reasons) {
-        List<String> distinct = new ArrayList<String>();
-        List<Integer> counts = new ArrayList<Integer>();
-        for (int i = 0; i < reasons.size(); i++) {
-            String reason = reasons.get(i);
-            int at = distinct.indexOf(reason);
-            if (at < 0) {
-                distinct.add(reason);
-                counts.add(Integer.valueOf(1));
-            } else {
-                counts.set(at, Integer.valueOf(counts.get(at).intValue() + 1));
-            }
-        }
         StringBuilder b = new StringBuilder();
-        for (int i = 0; i < distinct.size(); i++) {
-            if (b.length() > 0) b.append("  ");
-            b.append(distinct.get(i)).append(" (").append(counts.get(i)).append(')');
+        for (int i = 0; i < reasons.size() && i < ATTEMPTS_SHOWN; i++) {
+            if (b.length() > 0) b.append(' ');
+            b.append(reasons.get(i));
         }
+        if (reasons.size() > ATTEMPTS_SHOWN) b.append(" +").append(reasons.size() - ATTEMPTS_SHOWN);
         return b.length() == 0 ? "nothing to try" : b.toString();
     }
+
+    private static final int ATTEMPTS_SHOWN = 6;
 }
