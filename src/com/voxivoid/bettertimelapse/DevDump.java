@@ -111,6 +111,11 @@ public final class DevDump {
         StringBuilder b = new StringBuilder();
         b.append("\u6743\u9650 ").append(hasWritePermission(context) ? "\u6709" : "\u65e0");   // 权限 有/无
         b.append("  \u72b6\u6001 ").append(storageState());                                 // 状态 <...>
+        // The two facts that decide whether a path can be created at all, and the canonical spelling of the
+        // root: six writes came back ENOENT for paths whose parents are demonstrably there and listable.
+        b.append("  \u89c4\u8303 ").append(canonicalRoot());                                 // 规范 <路径>
+        b.append("  \u5361\u6839\u5b58\u5728 ").append(exists(environmentPath("")));        // 卡根存在
+        b.append("  DCIM\u5b58\u5728 ").append(exists(environmentPath("DCIM")));              // DCIM存在
         b.append("  /mnt/sdcard\u53ef\u5199 ").append(writable("/mnt/sdcard"));               // 可写
         // The directory the old TimeLapse app created here and logged into. If this app may not write inside
         // it either, the difference is not the path and not the directory's owner; if it may, then where a
@@ -140,6 +145,26 @@ public final class DevDump {
             return state == null ? "?" : state;
         } catch (Throwable t) {
             return "?";
+        }
+    }
+
+    /** The card root as the filesystem resolves it, which is not always how it was spelled. */
+    private static String canonicalRoot() {
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext == null) return "?";
+            String canonical = ext.getCanonicalPath();
+            return canonical == null || canonical.length() == 0 ? "?" : canonical;
+        } catch (Throwable t) {
+            return "!(" + t.getClass().getSimpleName() + ")";
+        }
+    }
+
+    private static boolean exists(String path) {
+        try {
+            return path != null && path.length() > 0 && new File(path).exists();
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -190,6 +215,22 @@ public final class DevDump {
         } catch (Throwable t) {
             // Fall through to the fixed spellings below.
         }
+        // The canonical spelling of the card root, when it is a different one. The reports come back with
+        // ENOENT -- "no such file or directory" -- for paths whose parents demonstrably exist and are
+        // readable, which is exactly what a path that only *looks* right produces: a symlink chain that
+        // resolves somewhere the app may not create anything.
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext != null) {
+                String canonical = ext.getCanonicalPath();
+                if (!canonical.equals(ext.getPath())) {
+                    out.add(new File(new File(canonical, "DCIM"), NAME));
+                    out.add(new File(canonical, NAME));
+                }
+            }
+        } catch (Throwable t) {
+            // A root that will not resolve is itself the answer, and the probe reports it.
+        }
         out.add(new File("/mnt/sdcard/DCIM", NAME));
         out.add(new File("/mnt/sdcard", NAME));
         // The directory the old TimeLapse app made at the card root and logged into: on this body that is
@@ -238,8 +279,22 @@ public final class DevDump {
 
     private static boolean writeTo(File file, String body) {
         lastProblem = "";
+        if (attempt(file, body, false)) return true;
+        String truncated = lastProblem;
+        // Append as well, because the one log an app is known to have written on this card was written that
+        // way (TimeLapse's LOG.TXT, FileWriter(file, true)) and "create" and "open an existing file" are not
+        // the same operation on some storage layers.
+        if (attempt(file, body, true)) {
+            lastProblem = "";
+            return true;
+        }
+        lastProblem = truncated.equals(lastProblem) ? truncated : truncated + "/" + lastProblem;
+        return false;
+    }
+
+    private static boolean attempt(File file, String body, boolean append) {
         try {
-            OutputStream out = new FileOutputStream(file);
+            OutputStream out = new FileOutputStream(file, append);
             try {
                 out.write(body.getBytes("UTF-8"));
             } finally {
