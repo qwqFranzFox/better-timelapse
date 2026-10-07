@@ -942,6 +942,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         handler.removeCallbacks(onRelease);
         // The longer of the two signals: what the body says its exposure is, and how long its own callback
         // has taken when it sends one. Releasing before the exposure ends risks cutting the frame off.
+        panelOffArmed = false;                  // a new frame: its dark window is armed when it finishes
         pressWindowUsedMs = Frames.pressWindowMs(engine.plan(), Math.max(exposureMs, callbackHintMs));
         handler.postDelayed(onRelease, pressWindowUsedMs);
     }
@@ -1004,6 +1005,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 // saying its exposure took ten seconds, and the release has to wait for that.
                 if (took > callbackHintMs) callbackHintMs = took;
             }
+            frameSettled();
         }
     };
 
@@ -1026,12 +1028,36 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         pump();
         handler.removeCallbacks(onVerdict);
         handler.postDelayed(onVerdict, Frames.verdictDelayMs(engine.plan()));
-        // The frame is over, so this is the stretch in which the panel has nothing to show. Both of these are
-        // timers, never calls: switching the display output is a platform call with a surface behind it, and
-        // nothing slow may sit between a frame's due moment and its shutter (docs/DECISIONS.md A19).
-        armPanelOff();
+        // The frame is over, so this is the stretch in which the panel has nothing to show. A timer, never a
+        // call: switching the display output is a platform call with a surface behind it, and nothing slow may
+        // sit between a frame's due moment and its shutter (docs/DECISIONS.md A19).
+        frameSettled();
+    }
+
+    /**
+     * A frame has finished, by whichever of its two endings came first.
+     *
+     * <p>A frame ends twice: when the release timer fires, and when the body reports the shot through its
+     * shutter callback. Either can be first — the callback arrived 276–540 ms after the press in the logs, the
+     * release at 2500 ms — and both call this.
+     *
+     * <p>It exists because the panel switch was first armed only at the release, and the engine was still
+     * {@code EXPOSING} at that instant when its own callback had not come back yet. The gate refuses anything
+     * that is not a waiting run, so the off was never scheduled at all, and a session log came home with the
+     * row saying 每张之后关屏 and not one {@code panel} line in it: the feature reported nothing, did nothing,
+     * and looked exactly like a body that cannot switch its display. Nothing here may run while a frame is in
+     * flight; that is the invariant, and it is what the flag keeps.
+     */
+    private void frameSettled() {
+        if (!panelOffArmed) {
+            panelOffArmed = true;
+            armPanelOff();
+        }
         armPanelWake();
     }
+
+    /** Whether the panel's dark window has been armed for the frame that just finished. */
+    private boolean panelOffArmed;
 
     // ================================================================ the panel between frames
 
