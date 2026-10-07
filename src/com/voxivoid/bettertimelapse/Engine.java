@@ -227,8 +227,7 @@ public final class Engine {
             case EV_SHUTTER:
                 return onShutter(nowMs);
             case EV_TICK:
-                return onTick(nowMs);
-            case EV_ACK:
+                return onTick(nowMs);            case EV_ACK:
                 return onAck();
             case EV_TIMEOUT:
                 return onFrameLost("no file", nowMs);
@@ -310,6 +309,11 @@ public final class Engine {
             state = WAITING;
             return ACT_ARM_TIMER;
         }
+        // Anything but a waiting run ignores the clock, and PAUSED is the case that matters: the timer armed
+        // before the user pressed TRASH arrives after the state changed, and a frame must never depend on the
+        // shell having remembered to cancel it. A session log where a `pause` line is followed by another `shot`
+        // is what sent me looking, and this guard is why no frame is taken there
+        // (EngineTest.aPendingTimerCannotFireAFrameOnAPausedRun).
         if (state != WAITING) return ACT_NONE;
 
         long remaining = schedule.remainingMs(plan, nowMs);

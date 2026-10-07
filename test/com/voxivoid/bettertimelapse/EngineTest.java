@@ -241,6 +241,30 @@ class EngineTest {
     }
 
     @Test
+    void aPendingTimerCannotFireAFrameOnAPausedRun() {
+        // Checked against a real session log, where a `pause` line is followed by another `shot` -- which read
+        // like a frame taken after the user stopped the run. It is not: the tick that was already armed when
+        // the key was pressed arrives while the state is PAUSED, and this is the guard that makes it a no-op.
+        // The shell's own timers are cancelled on pause as well, but a frame must never depend on the shell
+        // having remembered to do that.
+        Shell shell = new Shell(plan(5000, 10, 0), 0);
+        shell.start();
+        shell.shoot();
+        assertEquals(Engine.ACT_NONE, shell.engine.step(Engine.EV_TRASH, 1000));
+
+        shell.now = 7_560;                                    // the moment the next frame was due
+        assertEquals(Engine.ACT_NONE, shell.engine.step(Engine.EV_TICK, shell.now));
+        assertEquals(1, shell.engine.fired(), "no frame was handed to the camera after the pause");
+        assertEquals(Engine.PAUSED, shell.engine.state());
+
+        // And the frame that moment belonged to is still there to be taken when the run resumes: pausing is a
+        // pause, not a decision to drop it.
+        shell.engine.step(Engine.EV_TRASH, shell.now);
+        assertEquals(Engine.ACT_FIRE, shell.pump());
+        assertEquals(2, shell.engine.fired());
+    }
+
+    @Test
     void theCentreButtonAcknowledgesAFinishedRun() {
         Shell shell = new Shell(plan(1000, 2, 0), 0);
         shell.start();

@@ -39,4 +39,6 @@ UNITS=(
     BodyCycle
     CardNames
     LogLines
+    DisplayApi
+    Screen
 )
