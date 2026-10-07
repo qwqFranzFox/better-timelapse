@@ -167,6 +167,39 @@ class HudTest {
     }
 
     @Test
+    void theTotalBarShowsTheRunAndNotJustTheWait() {
+        // Frames taken against frames planned -- the question worth a bar when someone has been standing at a
+        // camera for an hour. An unlimited run has no total, and inventing one is the kind of number this
+        // project exists to avoid.
+        assertEquals(0f, Hud.totalFraction(0, 300), 0.0001f);
+        assertEquals(0.5f, Hud.totalFraction(150, 300), 0.0001f);
+        assertEquals(1f, Hud.totalFraction(300, 300), 0.0001f);
+        assertEquals(1f, Hud.totalFraction(301, 300), 0.0001f, "past the end is still full");
+        assertEquals(Frames.UNKNOWN, Hud.totalFraction(12, Plan.FRAMES_UNLIMITED), 0.0001f,
+                "no total, no fraction");
+        assertEquals(Frames.UNKNOWN, Hud.totalFraction(12, 0), 0.0001f);
+    }
+
+    @Test
+    void theBarDriftsSoItDoesNotBurnTheSameRowsForHours() {
+        // A triangle wave: it has to reach both ends of the band, stay inside it, and come back -- the same few
+        // hundred pixels lit in the same rows for a whole night is what this is for.
+        float amp = 4f;
+        assertEquals(-amp, Hud.burnInShift(0, amp), 0.0001f, "starts at one end");
+        assertEquals(0f, Hud.burnInShift(Hud.BURN_IN_PERIOD_MS / 4, amp), 0.0001f, "through the middle");
+        assertEquals(amp, Hud.burnInShift(Hud.BURN_IN_PERIOD_MS / 2, amp), 0.0001f, "the other end");
+        assertEquals(0f, Hud.burnInShift(Hud.BURN_IN_PERIOD_MS * 3 / 4, amp), 0.0001f, "and back");
+        assertEquals(Hud.burnInShift(0, amp), Hud.burnInShift(Hud.BURN_IN_PERIOD_MS, amp), 0.0001f,
+                "thirty seconds later it is where it started");
+        for (long t = 0; t < 3 * Hud.BURN_IN_PERIOD_MS; t += 997) {
+            float v = Hud.burnInShift(t, amp);
+            assertTrue(v >= -amp && v <= amp, "inside the band at " + t + ": " + v);
+        }
+        assertEquals(0f, Hud.burnInShift(12_345, 0f), 0.0001f, "no room to move is no movement");
+        assertTrue(Hud.burnInShift(-5_000, amp) >= -amp, "a negative clock still lands in range");
+    }
+
+    @Test
     void theCountdownFractionFillsUpAsTheFrameApproaches() {
         // The one-line panel draws this fraction as a filled rectangle, and the fraction itself is here so it
         // can be checked off the camera -- the edge cases are the ones that were wrong before: an interval of

@@ -310,7 +310,55 @@ public final class Hud {
         return (float) (intervalMs - remainingMs) / (float) intervalMs;
     }
 
-    /** The progress line: frames taken against the plan, and how long the run has been going. */    /** The progress line: frames taken against the plan, and how long the run has been going. */
+    /**
+     * How far through the whole run this is, from {@code 0} to {@code 1}.
+     *
+     * <p>The bar under the countdown used to be the wait to the next frame, which answers "is it close" and
+     * nothing else. What a person standing at a camera for two hours wants is the other question: how much of
+     * this is left. So the bar is the run's own progress, frames taken against frames planned.
+     *
+     * <p>An unlimited run has no such thing, and inventing one would be the kind of number this project exists
+     * to avoid: {@link Frames#UNKNOWN} comes back and the panel falls back to the wait it can measure.
+     *
+     * @param landed frames taken.
+     * @param planned frames the plan asks for, or {@link Plan#FRAMES_UNLIMITED}.
+     * @return {@code 0}..{@code 1}, or {@link Frames#UNKNOWN} when there is no total to be a fraction of.
+     */
+    public static float totalFraction(int landed, int planned) {
+        if (planned == Plan.FRAMES_UNLIMITED || planned <= 0) return Frames.UNKNOWN;
+        if (landed <= 0) return 0f;
+        if (landed >= planned) return 1f;
+        return (float) landed / (float) planned;
+    }
+
+    /** How long the anti-burn-in drift takes to go up and come back. Slow enough to be unnoticed. */
+    public static final long BURN_IN_PERIOD_MS = 60_000;
+
+    /**
+     * Where to draw a fixed piece of screen so that it does not sit in the same place for hours.
+     *
+     * <p>A progress bar is the worst case for a panel: the same few hundred pixels lit, in the same rows, for a
+     * whole night. The panel already has display modes for this reason, but the bar is the one thing drawn for
+     * the entire run in every mode that shows it.
+     *
+     * <p>So it drifts: a triangle wave, up and then down, over {@link #BURN_IN_PERIOD_MS}. Triangle rather than
+     * sine because it is arithmetic that can be checked instead of a transcendental function that has to be
+     * trusted -- and the movement is not what anyone is looking at.
+     *
+     * @param nowMs a monotonic clock reading.
+     * @param amplitudePx how far to either side of the resting place, in canvas units.
+     * @return an offset in {@code [-amplitudePx, +amplitudePx]}.
+     */
+    public static float burnInShift(long nowMs, float amplitudePx) {
+        if (amplitudePx <= 0f) return 0f;
+        long period = BURN_IN_PERIOD_MS;
+        long phase = ((nowMs % period) + period) % period;          // a negative clock still lands in range
+        float half = period / 2f;
+        float t = phase < half ? phase / half : (period - phase) / half;   // up, then back down
+        return (t * 2f - 1f) * amplitudePx;
+    }
+
+    /** The progress line: frames taken against the plan, and how long the run has been going. */
     public static String progressLine(int landed, int planned, int accounted, int unverified,
             int skipped, long elapsedMs) {
         String of;

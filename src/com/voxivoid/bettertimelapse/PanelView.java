@@ -544,13 +544,22 @@ public final class PanelView extends View {
             // measured, and it is drawn as rectangles rather than characters: the panel's font is a CJK one, in
             // which '#' and '.' are not the same width, so a character bar comes out ragged. Geometry does not
             // care what the font does.
+            //
+            // It shows the run, not the wait: the countdown already says how long until the next frame, and the
+            // question worth a bar is how much of the whole thing is left. An unlimited run has no such fraction
+            // and falls back to the wait, which is the only progress it can honestly measure.
+            float fraction = Hud.totalFraction(engine.landed(), engine.plan().frames());
+            if (fraction == Frames.UNKNOWN) {
+                fraction = Hud.countdownFraction(next, engine.plan().intervalMs());
+            }
             float room = w - padding - x - paint.measureText(rest) - padding * 2f;
-            float track = Math.min(room, bigSize * 6f);
-            if (track >= smallSize * 3f) {                  // below this a bar says less than the number does
+            float track = Math.min(room, bigSize * 12f);
+            if (fraction != Frames.UNKNOWN && track >= smallSize * 3f) {
                 float barHeight = Math.max(2f, smallSize * 0.34f);
-                float top = y - smallSize * 0.62f;
-                float filled = track * Math.max(0f, Math.min(1f,
-                        Hud.countdownFraction(next, engine.plan().intervalMs())));
+                // The whole bar drifts up and down over a minute, so the lit rows are not the same rows for the
+                // hours a long run takes (Hud.burnInShift).
+                float top = y - smallSize * 0.62f + Hud.burnInShift(now(), barHeight * 1.5f);
+                float filled = track * Math.max(0f, Math.min(1f, fraction));
                 paint.setColor(colDim);
                 canvas.drawRect(x, top, x + track, top + barHeight, paint);
                 paint.setColor(colAccent);
