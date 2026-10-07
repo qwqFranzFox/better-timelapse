@@ -82,6 +82,9 @@ Camera camera = (Camera) cx.getMethod("getNormalCamera").invoke(cameraEx);
 | **拍摄是「按下 / 放开」一对，而且必须有活跃预览流**：`Camera.takePicture(null,null,null)`（按下）→ 约 **2500ms** → `CameraEx.cancelTakePicture()` + `Camera.startPreview()`（放开）。没有预览流时 `CameraEx.burstableTakePicture()` 会被拒，真机报 **`BurstableTakePicture failed`**（第一张之后必现） | 【实测·本机】+【recipe-lab 实测：`DevTools.SHUTTER_MS = 2500`，sample run 在 ILCE-6001 / 固件 v3.21 上拍成 77 张；`MainActivity.java:88` 的 `runNext = cancelCapture(); resumePreview();`，`:201` 的 `surfaceCreated = setPreviewDisplay + startPreview`】 |
 | 因此**这台机身的每张最小周期 ≈ 2.5s（按住窗口）+ 0.4s（放开到下一次按下的余量）= 2.9s**：「间隔 2s」在这台机身上物理做不到，不是排程写法问题 | 【实测·本机（2s 间隔下必被拒）】+【recipe-lab 的常量】 |
 | **这台机身当前写的是 RAW**：面板的「最新」行实测到 `DCIM/10561007/DSC00507.ARW`（`0s前`）。含义有两条：一次快门一个文件、但一个文件很大，所以「每张耗时」与「还能拍几张」都要按 RAW 的量级读；相机的目录名不一定是 `100MSDCF` 那种 roll 名（`10561007` 是机身按日期建的目录），所以递归走整棵 `DCIM` 是必须的（A18） | 【实测·本机，v0.1.0-dev.g37016620】 |
+| **间隔 3s 在这台机身上会丢帧（实测）**：一次运行 `落盘 17 核实 6 未核实 11`，同一时段的卡计数只涨了约 6 —— **17 张里约 6 张真的到了卡上**。recipe-lab 在同一机身跑通 77 张的循环是 `按住 2500ms + 稳定延时 1200ms = 3700ms`，与这个观察一致：**这台机身的实际下限接近 3.7s，不是 2.9s**（2.9s 只是快门按住窗口推出来的理论值） | 【实测·本机，v0.1.0-dev.g37016620 前后】 |
+| **快门回调延迟不是曝光时长**：同一张照片上 `回执 5/17 +916ms` —— 回调只到了 5 次，平均 916ms。916ms 远大于当时的曝光（手持室内），所以它量的是**平台的报告延迟**，不能当曝光代理（A27 里把它当曝光提示，因此在这样的机身上不生效，只会退回常数——设计上安全但无用） | 【实测·本机，同一版】 |
+| **走一次卡目录约 858ms**（`读数 858ms`）：这正是它必须待在工作线程、每帧只走一次的原因（A19） | 【实测·本机，同一版】 |
 | **机身周期只能靠「被拒」学**：没有曝光时间可读、没有 busy 标志可问。因此新面板读数 `机身 >X.Xs` 是**下界**（一次被拒证明了机身至少忙了这么久），并且被拒时 evidence 行直接写「快门被拒：每张至少 N，间隔太短」 | 【本项目的设计（[DECISIONS](DECISIONS.md) A27）】**未在真机上验证**：还没人为地设过一个长曝光来看它是否真的被拒出更大的下界 |
 | **静音快门与驱动模式都能读回**：面板的诊断行实测到 `silent-shutter-mode=false  drive-mode=single`，与面板上两行的值一致 —— 这是 A25「两个方向都下发 + 从机身取值打底」在真机上的第一次确认 | 【实测·本机，同一版】 |
 | **已用本 app 自己证实**：间隔 **5s** 连拍成功、**卡上文件与张数完全一致**（`卡增`/`核实` 逐帧对上）；间隔 **2s** 则被拒（`BurstableTakePicture failed`）。即 A20 推出的 2.9s 下限在真机上成立 | 【实测·本机，better-timelapse v0.1.0-dev.g88fa8dc0】 |

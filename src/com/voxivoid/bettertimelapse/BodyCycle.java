@@ -83,8 +83,8 @@ public final class BodyCycle {
      * long the body stays busy. The larger of the two is the honest answer, and until something has been
      * refused the constant is all there is.
      */
-    public long shortestIntervalMs() {
-        return Math.max(Frames.shortestIntervalMs(), lowerBoundMs + MARGIN_MS);
+    public long shortestIntervalMs(Plan plan) {
+        return Math.max(Frames.shortestIntervalMs(plan), lowerBoundMs + MARGIN_MS);
     }
 
     /** Kept clear past the proven busy period before the next press is asked for. */

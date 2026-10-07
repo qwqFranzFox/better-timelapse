@@ -66,9 +66,23 @@ class FramesTest {
     }
 
     @Test
-    void theShortestIntervalIsThePressWindowPlusTheMargin() {
-        assertEquals(2900, Frames.shortestIntervalMs());
-        assertTrue(Frames.shortestIntervalMs() > Frames.PRESS_MS);
+    void theShortestIntervalIsThePressWindowPlusWhatTheBodyGetsToRecover() {
+        Plan p = plan(5000, 10);
+        // The settle row used to be a floor of its own and the constant under it was 400 ms, which made the
+        // shortest interval 2.9 s — and the camera kept six frames out of seventeen at a 3 s interval.
+        p.set(Plan.ROW_SETTLE, 1);                                   // 1200 ms, the default
+        assertEquals(3700, Frames.shortestIntervalMs(p));
+
+        p.set(Plan.ROW_SETTLE, 0);                                   // 800 ms, the smallest the row offers
+        assertEquals(3300, Frames.shortestIntervalMs(p));
+
+        // Whatever the row says, the floor never drops below the shutter's own window plus the margin the
+        // next press needs after the release.
+        for (int i = 0; i < Plan.SETTLE_MS.length; i++) {
+            p.set(Plan.ROW_SETTLE, i);
+            assertTrue(Frames.shortestIntervalMs(p) >= Frames.PRESS_MS + Frames.RELEASE_MARGIN_MS,
+                    "settle index " + i);
+        }
     }
 
     @Test

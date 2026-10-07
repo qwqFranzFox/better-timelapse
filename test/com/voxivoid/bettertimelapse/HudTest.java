@@ -70,20 +70,20 @@ class HudTest {
 
     @Test
     void theProgressLineCountsWhatTheCardCouldNotAccountFor() {
-        String plain = Hud.progressLine(10, 300, 0, 0, 20_000);
+        String plain = Hud.progressLine(10, 300, 10, 0, 0, 20_000);
         assertTrue(plain.startsWith("已拍 10 / 300"), plain);
         assertTrue(plain.contains("已用"), plain);
         assertFalse(plain.contains("未核实"), "nothing unaccounted for means no such word");
         assertFalse(plain.contains("跳过"), plain);
 
-        String odd = Hud.progressLine(10, 300, 2, 3, 20_000);
+        String odd = Hud.progressLine(10, 300, 8, 2, 3, 20_000);
         assertTrue(odd.contains("未核实 2"), odd);
         assertTrue(odd.contains("跳过 3"), "a hole in the timeline is said out loud: " + odd);
     }
 
     @Test
     void anUnlimitedPlanDoesNotPretendToHaveAFinishingLine() {
-        String line = Hud.progressLine(42, Plan.FRAMES_UNLIMITED, 0, 0, 1000);
+        String line = Hud.progressLine(42, Plan.FRAMES_UNLIMITED, 42, 0, 0, 1000);
         assertTrue(line.contains("42"), line);
         assertFalse(line.contains("/"), "an endless run has no denominator: " + line);
     }
@@ -100,6 +100,28 @@ class HudTest {
 
         String endless = Hud.labelLine(42, Plan.FRAMES_UNLIMITED, 0, 0);
         assertFalse(endless.contains("/"), "an endless run has no denominator: " + endless);
+    }
+
+    @Test
+    void aRunThatKeepsSixFramesOutOfSeventeenSaysSo() {
+        // Measured on the camera: 落盘 17, 核实 6, and the panel said neither in words. The old app reported
+        // the seventeen and nothing else.
+        assertTrue(Hud.worthSaying(17, 6), "six of seventeen is worth interrupting the user for");
+        assertTrue(Hud.worthSaying(5, 2));
+        assertFalse(Hud.worthSaying(17, 15), "in-flight writes make a small gap normal");
+        assertFalse(Hud.worthSaying(4, 0), "four frames is not enough to draw a conclusion from");
+
+        String line = Hud.shortfallLine(17, 6);
+        assertTrue(line.contains("6 / 17"), line);
+        assertTrue(line.contains("间隔"), "the line has to say what to change: " + line);
+    }
+
+    @Test
+    void theProgressLinePutsTheTakenAndTheAccountedSideBySide() {
+        String line = Hud.progressLine(17, 135, 6, 11, 0, 1000);
+        assertTrue(line.startsWith("已拍 17 / 135"), line);
+        assertTrue(line.contains("核实 6"), "the two numbers belong together: " + line);
+        assertTrue(line.contains("未核实 11"), line);
     }
 
     @Test

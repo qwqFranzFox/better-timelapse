@@ -80,9 +80,18 @@ public final class Frames {
     /** Kept clear between the release and the next press: the body is not instantly ready again. */
     public static final long RELEASE_MARGIN_MS = 400;
 
-    /** The shortest interval this body can be asked for, from its own press/release window. */
-    public static long shortestIntervalMs() {
-        return PRESS_MS + RELEASE_MARGIN_MS;
+    /**
+     * The shortest interval this body can be asked for: the shutter's own press window, plus the time the
+     * plan gives the body to recover after a frame.
+     *
+     * <p>The second half used to be a 400 ms constant, which made the floor 2.9 s — and the camera then
+     * shot 17 frames at a 3 s interval and kept six of them (photographed, `核实 6 / 落盘 17`). Recipe Lab's
+     * loop on this same body leaves 2500 ms for the press and then waits its settle delay, default 1200 ms:
+     * 3.7 s, which is the number that has actually been shot here. So the settle row is part of the floor
+     * rather than a floor of its own, and the row finally decides something the user can see.
+     */
+    public static long shortestIntervalMs(Plan plan) {
+        return PRESS_MS + Math.max(RELEASE_MARGIN_MS, plan.settleMs());
     }
 
     /**

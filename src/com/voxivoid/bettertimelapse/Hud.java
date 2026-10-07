@@ -261,8 +261,8 @@ public final class Hud {
     }
 
     /** The progress line: frames taken against the plan, and how long the run has been going. */
-    public static String progressLine(int landed, int planned, int unverified, int skipped,
-            long elapsedMs) {
+    public static String progressLine(int landed, int planned, int accounted, int unverified,
+            int skipped, long elapsedMs) {
         String of;
         if (planned == Plan.FRAMES_UNLIMITED) {
             of = landed + FRAMES_UNIT;                                   // 张
@@ -272,7 +272,11 @@ public final class Hud {
         // 已拍, not 已落盘: taken is what this app knows at this point. Whether each one reached the
         // card is what the tail of this line is about, and a label that claims more than the app can
         // see is the habit this whole project exists to avoid.
-        String tail = "   \u5df2\u7528 " + clock(elapsedMs, false);          // 已用
+        // What the card has actually answered for, next to what was taken: the two numbers that matter,
+        // side by side, where the run's own progress is reported. A run that takes seventeen frames and
+        // keeps six says so here rather than looking like seventeen.
+        String tail = "   \u6838\u5b9e " + accounted + "   \u5df2\u7528 "               // 核实 N  已用
+                + clock(elapsedMs, false);
         if (unverified > 0) {
             // Taken, not accounted for on the card. Saying it is the difference between "the app cannot
             // see this card" and "the app is losing frames", and the two need different answers.
@@ -293,6 +297,23 @@ public final class Hud {
         if (s < 60) return s + "s";
         if (s < 3600) return (s / 60) + "min";
         return (s / 3600) + "h";
+    }
+
+    /**
+     * The alarm for a run whose frames are not reaching the card.
+     *
+     * <p>Measured on this body: at a 3 s interval it took seventeen frames and the card kept six — the app
+     * knew both numbers and said neither. The old app reported the seventeen. In-flight writes make a small
+     * gap normal, so this only speaks when most of the run is missing.
+     */
+    public static String shortfallLine(int taken, int accounted) {
+        return "\u5361\u4e0a\u53ea\u5bf9\u4e0a " + accounted + " / " + taken         // 卡上只对上 N / M
+                + " \u5f20\uff1a\u95f4\u9694\u592a\u77ed\u6216\u673a\u8eab\u5fd9";      // 张：间隔太短或机身忙
+    }
+
+    /** Whether a shortfall is bad enough to interrupt the user with: fewer than half, and enough frames. */
+    public static boolean worthSaying(int taken, int accounted) {
+        return taken >= 5 && accounted * 2 < taken;
     }
 
     /**

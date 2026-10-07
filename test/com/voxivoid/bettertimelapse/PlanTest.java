@@ -31,7 +31,8 @@ class PlanTest {
     void theDefaultIntervalIsOneThisBodyCanActuallyShoot() {
         // The default used to be 2 s, which this camera refuses (its floor is about 2.9 s), so a new user's
         // first run began with the app warning them about the app's own default.
-        assertTrue(new Plan().intervalMs() >= Frames.shortestIntervalMs(),
+        Plan fresh = new Plan();
+        assertTrue(fresh.intervalMs() >= Frames.shortestIntervalMs(fresh),
                 "the plan a fresh install starts on has to be shootable on the body it runs on");
     }
 

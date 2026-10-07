@@ -19,11 +19,12 @@ class BodyCycleTest {
     @Test
     void nothingIsClaimedBeforeAnythingIsRefused() {
         BodyCycle body = new BodyCycle();
+        Plan plan = new Plan();
 
         assertFalse(body.known());
         assertEquals(BodyCycle.UNKNOWN, body.lowerBoundMs());
-        assertEquals(Frames.shortestIntervalMs(), body.shortestIntervalMs(),
-                "with nothing measured, only the shutter's own floor is known");
+        assertEquals(Frames.shortestIntervalMs(plan), body.shortestIntervalMs(plan),
+                "with nothing measured, only the plan's own floor is known");
     }
 
     @Test
@@ -34,7 +35,8 @@ class BodyCycleTest {
 
         assertTrue(body.known());
         assertEquals(5000, body.lowerBoundMs());
-        assertEquals(5400, body.shortestIntervalMs(), "the proven busy period plus the margin");
+        assertEquals(5400, body.shortestIntervalMs(new Plan()),
+                "the proven busy period plus the margin");
         assertEquals(1, body.refusals());
         assertEquals(1, body.samples());
     }
@@ -86,7 +88,7 @@ class BodyCycleTest {
         // It is a real measurement, and the honest floor it implies is still the shutter's own constant:
         // a body that was busy for 300 ms has not raised the interval anybody should be offered.
         assertEquals(300, body.lowerBoundMs());
-        assertEquals(Frames.shortestIntervalMs(), body.shortestIntervalMs());
+        assertEquals(Frames.shortestIntervalMs(new Plan()), body.shortestIntervalMs(new Plan()));
     }
 
     @Test
@@ -109,6 +111,7 @@ class BodyCycleTest {
         body.accepted(0);
         body.refused(100);
 
-        assertTrue(body.shortestIntervalMs() >= Frames.shortestIntervalMs());
+        Plan plan = new Plan();
+        assertTrue(body.shortestIntervalMs(plan) >= Frames.shortestIntervalMs(plan));
     }
 }

@@ -250,6 +250,11 @@ public final class PanelView extends View {
      * shell sent — which is how a reflection failure that disabled silent shutter stayed invisible
      * while the settings row said it was applied. Evidence that scrolls away is not evidence.
      */
+    /** Forget the evidence: it belongs to one run, and a warning that has been fixed is a lie. */
+    public void clearEvidence() {
+        evidence = "";
+    }
+
     public void setEvidence(String message) {
         if (evidence.length() > 0) return;      // the first failure is the interesting one
         evidence = message == null ? "" : message;
@@ -384,8 +389,14 @@ public final class PanelView extends View {
 
         y = drawRows(canvas, w, y, rowHeight * rowsVisible);
 
-        drawProgress(canvas, w, y, h - padding - y);
-        drawLegend(canvas, w, h);
+        // The diagnostics live under the progress block and grow upwards from the legend, so the two used
+        // to be drawn through each other the moment there were three of them: the photograph shows 卡根 and
+        // 已拍 on the same baseline, and the measured line under the interval warning. The notes get a fixed
+        // budget and the progress block gets what is left; past the budget the least important line is
+        // dropped rather than overprinted.
+        float notes = noteBudget();
+        drawProgress(canvas, w, y, Math.max(0f, h - padding - y - notes));
+        drawLegend(canvas, w, h, h - padding - y - notes);
     }
 
     /** The label-only state: the state line and the plan, centred, on black. */
@@ -524,6 +535,13 @@ public final class PanelView extends View {
         return top + height;
     }
 
+    /** Frames the card has answered for: taken, and no longer outstanding. */
+    private int accounted() {
+        int open = engine.unverified();
+        int landed = engine.landed();
+        return landed > open ? landed - open : 0;
+    }
+
     /** The progress block, and the measured line that is the only honest source of drift. */
     private void drawProgress(Canvas canvas, float w, float top, float height) {
         if (engine.state() == Engine.IDLE) return;
@@ -543,7 +561,7 @@ public final class PanelView extends View {
             paint.setTextSize(smallSize);
             paint.setColor(colText);
             String second = Hud.progressLine(engine.landed(), engine.plan().frames(),
-                    engine.unverified(), engine.skipped(), now());
+                    accounted(), engine.unverified(), engine.skipped(), now());
             if (engine.lastLoss().length() > 0) second = second + "   " + engine.lastLoss();
             canvas.drawText(clip(second, full), padding,
                     baselineIn(top + height * 0.40f, height * 0.46f, paint), paint);
@@ -561,8 +579,8 @@ public final class PanelView extends View {
 
         paint.setTextSize(smallSize);
         paint.setColor(colText);
-        canvas.drawText(Hud.progressLine(engine.landed(), planned, engine.unverified(),
-                        engine.skipped(), now()),
+        canvas.drawText(Hud.progressLine(engine.landed(), planned, accounted(),
+                        engine.unverified(), engine.skipped(), now()),
                 padding, baselineIn(barTop + barHeight, height * 0.42f, paint), paint);
 
         if (engine.meanIntervalMs() > 0) {
@@ -575,8 +593,22 @@ public final class PanelView extends View {
         }
     }
 
-    /** The key legend, and the one thing that must never be a surprise: the run's own state. */
-    private void drawLegend(Canvas canvas, float w, float h) {
+    /**
+     * How much height the diagnostics under the progress block are allowed: the legend line, then up to
+     * three wrapped lines of notes.
+     */
+    private float noteBudget() {
+        float lineHeight = smallSize - paint.ascent() + paint.descent();
+        return Math.min(lineHeight * 4f, (getHeight()) * 0.30f);
+    }
+
+    /**
+     * The key legend, and the one thing that must never be a surprise: the run's own state.
+     *
+     * @param limit the topmost baseline the stack may reach: anything above it would be drawn over the
+     *              progress block.
+     */
+    private void drawLegend(Canvas canvas, float w, float h, float limit) {
         paint.setTextSize(smallSize);
         paint.setColor(colDim);
         String legend = Hud.legend();
@@ -617,16 +649,18 @@ public final class PanelView extends View {
         // Wrapped, not clipped. A single clipped line threw away most of the method list the one time
         // the list was the whole point — diagnostics that do not fit are diagnostics that do not exist.
         float wrapWidth = w - padding * 2f;
-        if (evidence.length() > 0) {
+        // Drawn from the bottom up, most important first: the first line that would reach above the budget
+        // is left off. A diagnostic drawn on top of another one is not a diagnostic.
+        if (evidence.length() > 0 && fits(y, lineHeight, lines + 1, limit)) {
             paint.setColor(colWarn);
             lines += wrap(canvas, evidence, padding, y - lineHeight * lines, wrapWidth, 3);
             paint.setColor(colDim);
         }
-        if (numbers.length() > 0) {
+        if (numbers.length() > 0 && fits(y, lineHeight, lines + 1, limit)) {
             paint.setColor(colDim);
             lines += wrap(canvas, numbers, padding, y - lineHeight * lines, wrapWidth, 2);
         }
-        if (roots.length() > 0) {
+        if (roots.length() > 0 && fits(y, lineHeight, lines + 1, limit)) {
             paint.setColor(colDim);
             wrap(canvas, roots, padding, y - lineHeight * lines, wrapWidth, 2);
         }
@@ -662,6 +696,11 @@ public final class PanelView extends View {
      * <p>{@code ascent()} and {@code descent()} rather than {@code getFontMetrics()}: the latter only
      * arrived in API 29, and this app runs on API 10.
      */
+    /** Whether one more line at {@code lines + 1} still sits below {@code limit}. */
+    private boolean fits(float legendBaseline, float lineHeight, float lines, float limit) {
+        return legendBaseline - lineHeight * lines >= limit - lineHeight * 0.5f;
+    }
+
     private float baselineIn(float top, float height, Paint p) {
         float ascent = p.ascent(), descent = p.descent();
         return top + (height - (descent - ascent)) / 2f - ascent;

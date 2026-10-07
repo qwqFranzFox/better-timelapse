@@ -92,6 +92,9 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** Whether a run was in progress when the app was switched away from. */
     private boolean runInterrupted;
 
+    /** Whether this run has already been told that most of its frames are not reaching the card. */
+    private boolean shortfallSaid;
+
     /** Whether this app is the one holding the exposure lock. AEL cannot be read back, so it is tracked. */
     private boolean aelLockedByUs;
 
@@ -503,7 +506,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void warnIfImpossible() {
         Plan plan = engine.plan();
-        long shortest = body.shortestIntervalMs();
+        long shortest = body.shortestIntervalMs(plan);
         if (plan.intervalMs() >= shortest) return;
         panel.setEvidence("\u95f4\u9694 " + Steps.shortMs(plan.intervalMs())                // 间隔
                 + " \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 "                        // 短于本机身所需的
@@ -532,6 +535,24 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 break;
         }
         panel.invalidate();
+        checkShortfall();
+    }
+
+    /**
+     * Say it, once per run, when most of what was taken never reached the card.
+     *
+     * <p>This is the alarm the photograph asked for: seventeen frames taken, six accounted for, and the
+     * panel showing only the two numbers in small dim text. The old app would have reported seventeen and
+     * nothing else (docs/PAIN-POINTS.md U-06). Once per run, because a line that keeps re-announcing itself
+     * is a line the user stops reading.
+     */
+    private void checkShortfall() {
+        if (shortfallSaid || !engine.midRun()) return;
+        int taken = engine.landed();
+        int accounted = confirmed();
+        if (!Hud.worthSaying(taken, accounted)) return;
+        shortfallSaid = true;
+        panel.setEvidence(Hud.shortfallLine(taken, accounted));
     }
 
     /** Post the timer for the moment the next frame is due, cancelling whatever was pending. */
@@ -787,7 +808,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
 
     /** The card's own lines: where it was read, what it holds, and what it just did. */
     private void pushCardLines() {
-        panel.setRoots("\u5361\u6839 " + (cardRoots.length() == 0 ? "\u65e0" : cardRoots)   // 卡根 / 无
+        // While the card is being read, the root's path is the useful fact; the per-root counts were a
+        // startup diagnostic and they are only recomputed when the root changes, so leaving them on screen
+        // put a stale number next to the live one on the line below (photographed: 648 beside 654). The
+        // full enumeration comes back exactly when it is the answer — a card this app cannot read at all.
+        String where = cardCount == Frames.UNKNOWN && cardRoots.length() > 0 ? cardRoots : cardRoot;
+        panel.setRoots("\u5361\u6839 " + (where.length() == 0 ? "\u65e0" : where)         // 卡根 / 无
                 + "  " + newestLine());
         panel.setNumbers("\u5361\u589e " + lastGained + " \u6587\u4ef6"                     // 卡增
                 + "  \u6838\u5b9e " + confirmed()                                           // 核实
@@ -954,6 +980,11 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                 handler.removeCallbacks(onCentreHold);
                 if (centre.up() == Keys.Hold.SHORT) {
                     if (engine.state() == Engine.IDLE) {
+                        // The evidence line is about THIS run: it kept the first thing it was ever told, so a
+                        // warning that had been fixed stayed on screen through every later run. Photographed
+                        // on the camera: 间隔 3s 短于本机身所需的 2.9s, with the interval row reading 3 s.
+                        panel.clearEvidence();
+                        shortfallSaid = false;
                         applyPlanToCamera();
                         warnIfImpossible();
                     }
