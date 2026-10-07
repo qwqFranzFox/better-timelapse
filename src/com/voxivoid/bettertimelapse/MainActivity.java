@@ -112,6 +112,17 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     /** The longest the body's own shutter callback has taken, or 0 when it has never arrived. */
     private long callbackHintMs;
 
+    /**
+     * What a frame costs the body, read from the camera rather than assumed.
+     *
+     * <p>{@link #exposureMs} is the shutter speed the body is set to ({@code shutter-speed-nume / -deno}),
+     * and {@link #longExposureNr} doubles it when the body takes its dark frame afterwards. Together they are
+     * the fact the minimum interval has been guessing at since the first version — and on this body they
+     * were four seconds and on, which is eight seconds per frame against a five-second plan.
+     */
+    private long exposureMs = Frames.UNKNOWN;
+    private boolean longExposureNr;
+
     /** Attempts at the frame currently due, and the wait before the next one. */
     private long retryDelayMs = FIRE_RETRY_MS;
 
@@ -354,6 +365,13 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      *
      * <p>A write that fails is reported on the panel: a diagnostic file nobody can find is worse than none.
      */
+    /** The exposure, as the panel says it: {@code 曝光 4s} or {@code 曝光 4s+NR}. */
+    private String exposureNote() {
+        if (exposureMs <= 0) return "";
+        return "  \u66dd\u5149 " + Steps.shortMs((int) exposureMs)                              // 曝光 <n>
+                + (longExposureNr ? "+NR" : "");
+    }
+
     private void writeDeviceDump() {
         dumpAttempts++;
         String written = DevDump.write(this, deviceReport());
@@ -375,7 +393,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             panel.setRoots("曝光键 " + camera.exposureReport());
         } else {
             panel.setCameraNote(camera.capabilities().summary(camera.previewing())
-                    + "  \u6e05\u5355 " + written);                                          // 清单 <路径>
+                    + exposureNote() + "  \u6e05\u5355 " + written);                          // 清单 <路径>
         }
     }
 
@@ -611,13 +629,25 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void warnIfImpossible() {
         Plan plan = engine.plan();
-        long shortest = body.shortestIntervalMs(plan);
+        long measured = body.shortestIntervalMs(plan);
+        long planned = Frames.shortestIntervalMs(plan, exposureMs, longExposureNr);
+        long shortest = Math.max(measured, planned);
         if (plan.intervalMs() >= shortest) return;
-        panel.setEvidence("\u95f4\u9694 " + Steps.shortMs(plan.intervalMs())                // 间隔
-                + " \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 "                        // 短于本机身所需的
-                + Steps.shortMs((int) shortest)                                                     // 2.9s（或实测下界）
-                + (body.known() ? "\uff08\u5b9e\u6d4b\uff09" : "")                             // （实测）
-                + "\uff1a\u76f8\u673a\u4f1a\u6765\u4e0d\u53ca");                          // ：相机会来不及
+        StringBuilder why = new StringBuilder();
+        why.append("\u95f4\u9694 ").append(Steps.shortMs(plan.intervalMs()))                 // 间隔 <n>
+                .append(" \u77ed\u4e8e\u672c\u673a\u8eab\u6240\u9700\u7684 ")              // 短于本机身所需的
+                .append(Steps.shortMs((int) shortest));                                     // <n>
+        if (planned >= measured && exposureMs > 0) {
+            // The number the user can do something about: it is their shutter speed, and the doubling is the
+            // body's own noise reduction rather than anything this app chose.
+            why.append("\uff08\u66dd\u5149 ").append(Steps.shortMs((int) exposureMs));       // （曝光 <n>
+            if (longExposureNr) why.append(" + \u964d\u566a");                              // + 降噪
+            why.append("\uff09");                                                           // ）
+        } else if (measured > planned) {
+            why.append("\uff08\u5b9e\u6d4b\uff09");                                        // （实测）
+        }
+        why.append("\uff1a\u76f8\u673a\u4f1a\u6765\u4e0d\u53ca");                       // ：相机会来不及
+        panel.setEvidence(why.toString());
     }
 
     /**
@@ -745,7 +775,10 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
         // frame waits for. It is scheduled here, against the frame's own moment, so the press window is
         // as long as this body wants it to be and no longer (docs/DECISIONS.md A20).
         handler.removeCallbacks(onRelease);
-        handler.postDelayed(onRelease, Frames.pressWindowMs(engine.plan(), callbackHintMs));
+        // The longer of the two signals: what the body says its exposure is, and how long its own callback
+        // has taken when it sends one. Releasing before the exposure ends risks cutting the frame off.
+        handler.postDelayed(onRelease,
+                Frames.pressWindowMs(engine.plan(), Math.max(exposureMs, callbackHintMs)));
     }
 
     /**
@@ -985,11 +1018,30 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
     };
 
     private void pushDeviceStatus() {
+        refreshExposure();
         long perFrame = measuredFrameBytes;
         if (perFrame <= 0) perFrame = cardNewestBytes;
         if (perFrame <= 0) perFrame = FALLBACK_FRAME_BYTES;
         panel.setDeviceStatus(Device.batteryPercent(this), Device.charging(this),
                 Device.freeBytes(cardRoot.length() == 0 ? null : cardRoot), perFrame);
+    }
+
+    /**
+     * Ask the body how long its frames are, and remember the answer.
+     *
+     * <p>Not per frame: reading parameters means copying the whole parameter set, which is not free on this
+     * platform, and the shutter speed is something a person changes between runs rather than during one. Every
+     * five seconds and at every run start is often enough for the two places it matters.
+     */
+    private void refreshExposure() {
+        if (!camera.isOpen()) return;
+        exposureMs = camera.exposureMs();
+        longExposureNr = camera.longExposureNr();
+    }
+
+    /** How long one frame occupies the body: the exposure, doubled when it takes a dark frame too. */
+    private long occupancyMs() {
+        return Frames.occupancyMs(exposureMs, longExposureNr);
     }
 
     private long now() {
@@ -1114,6 +1166,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         panel.clearEvidence();
                         shortfallSaid = false;
                         retryDeviceDump();
+                        refreshExposure();
                         applyPlanToCamera();
                         warnIfImpossible();
                     }

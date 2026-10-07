@@ -66,6 +66,40 @@ class FramesTest {
     }
 
     @Test
+    void theExposureIsReadFromTheTwoParametersThatHoldIt() {
+        // Measured on this body: shutter-speed-nume=4 shutter-speed-deno=1 in manual exposure.
+        assertEquals(4000, Frames.exposureMs("4", "1"));
+        assertEquals(16, Frames.exposureMs("1", "60"));
+        assertEquals(500, Frames.exposureMs("1", "2"));
+        assertEquals(30_000, Frames.exposureMs("30", "1"));
+
+        assertEquals(Frames.UNKNOWN, Frames.exposureMs("1", "0"), "bulb has no length to read");
+        assertEquals(Frames.UNKNOWN, Frames.exposureMs("0", "1"));
+        assertEquals(Frames.UNKNOWN, Frames.exposureMs(null, "60"), "a body that will not say");
+        assertEquals(Frames.UNKNOWN, Frames.exposureMs("", "60"));
+        assertEquals(Frames.UNKNOWN, Frames.exposureMs("auto", "60"));
+    }
+
+    @Test
+    void noiseReductionDoublesWhatAFrameCosts() {
+        assertEquals(4000, Frames.occupancyMs(4000, false));
+        assertEquals(8000, Frames.occupancyMs(4000, true),
+                "a four-second exposure with long-exposure NR is eight seconds of camera");
+        assertEquals(0, Frames.occupancyMs(Frames.UNKNOWN, true));
+    }
+
+    @Test
+    void aLongExposureRaisesTheShortestInterval() {
+        Plan p = plan(5000, 10);                                     // settle 1200 → floor 3700
+
+        assertEquals(3700, Frames.shortestIntervalMs(p, Frames.UNKNOWN, false));
+        assertEquals(3700, Frames.shortestIntervalMs(p, 2000, false), "a short exposure does not bind");
+        assertEquals(4200, Frames.shortestIntervalMs(p, 4000, false), "four seconds plus the margin");
+        assertEquals(8200, Frames.shortestIntervalMs(p, 4000, true),
+                "and the dark frame puts it at eight: a five-second plan cannot do this");
+    }
+
+    @Test
     void theShortestIntervalIsThePressWindowPlusWhatTheBodyGetsToRecover() {
         Plan p = plan(5000, 10);
         // The settle row used to be a floor of its own and the constant under it was 400 ms, which made the

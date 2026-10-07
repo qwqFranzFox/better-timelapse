@@ -270,6 +270,30 @@ public final class SonyCamera {
         return Frames.UNKNOWN;
     }
 
+    /**
+     * The exposure this body is set to, in milliseconds, or {@link Frames#UNKNOWN}.
+     *
+     * <p>Read from {@code shutter-speed-nume} and {@code shutter-speed-deno} — the two live parameters that
+     * hold it, confirmed by name on an ILCE-6300 running platform 2.15 (they were in the parameter list all
+     * along; the filter looking for them was missing the word "shutter" for two builds).
+     */
+    public long exposureMs() {
+        return Frames.exposureMs(readKey("shutter-speed-nume"), readKey("shutter-speed-deno"));
+    }
+
+    /**
+     * Whether the body takes a second, dark frame after a long exposure.
+     *
+     * <p>{@code long-exposure-nr}, and it doubles what a frame costs: the same body, with a four-second
+     * exposure and this on, is busy for eight seconds per frame.
+     */
+    public boolean longExposureNr() {
+        String value = readKey("long-exposure-nr");
+        if (value == null) return false;
+        String v = value.trim().toLowerCase(java.util.Locale.US);
+        return "true".equals(v) || "on".equals(v) || "1".equals(v);
+    }
+
     /** The body's own drive mode as a {@code Plan.DRIVE_*}, or {@code Frames.UNKNOWN}. */
     public int driveModeHeld() {
         String value = readKey("drive-mode");

@@ -81,6 +81,46 @@ public final class Frames {
     public static final long RELEASE_MARGIN_MS = 400;
 
     /**
+     * The exposure the body is set to, read from the two parameters that hold it.
+     *
+     * <p>Sony reports a shutter speed as a fraction: {@code shutter-speed-nume} over
+     * {@code shutter-speed-deno}. Four over one is four seconds; one over sixty is a sixtieth. A zero
+     * denominator is bulb (the body holds the shutter open until it is told to stop, so there is no length
+     * to read), and a missing key means the body would not say — both come back as {@link #UNKNOWN}.
+     *
+     * <p>This is the number the whole minimum-interval question turns on, and the camera does answer it:
+     * measured on this body, {@code shutter-speed-nume=4 shutter-speed-deno=1} in manual mode.
+     */
+    public static long exposureMs(String nume, String deno) {
+        long numerator = number(nume);
+        long denominator = number(deno);
+        if (numerator <= 0 || denominator <= 0) return UNKNOWN;
+        return numerator * 1000L / denominator;
+    }
+
+    private static long number(String text) {
+        if (text == null) return UNKNOWN;
+        try {
+            return Long.parseLong(text.trim());
+        } catch (Throwable t) {
+            return UNKNOWN;
+        }
+    }
+
+    /**
+     * How long one frame occupies the body.
+     *
+     * <p>The exposure, and then — when long-exposure noise reduction is on — a second, dark frame of the
+     * same length, which the body takes immediately afterwards. Measured on this body:
+     * {@code long-exposure-nr=true} with a four-second exposure, so a frame that looks like four seconds
+     * occupies it for eight. An interval worked out from the exposure alone would be half of what is needed.
+     */
+    public static long occupancyMs(long exposureMs, boolean longExposureNr) {
+        if (exposureMs <= 0) return 0;
+        return longExposureNr ? exposureMs * 2 : exposureMs;
+    }
+
+    /**
      * The shortest interval this body can be asked for: the shutter's own press window, plus the time the
      * plan gives the body to recover after a frame.
      *
@@ -91,7 +131,21 @@ public final class Frames {
      * rather than a floor of its own, and the row finally decides something the user can see.
      */
     public static long shortestIntervalMs(Plan plan) {
-        return PRESS_MS + Math.max(RELEASE_MARGIN_MS, plan.settleMs());
+        return shortestIntervalMs(plan, UNKNOWN, false);
+    }
+
+    /**
+     * The same, with the exposure taken into account.
+     *
+     * <p>Two constraints, and the longer one wins. The shutter needs its press window and the body its
+     * settle time; and the frame itself occupies the body for the exposure plus — with noise reduction on —
+     * a dark frame of the same length. A plan that ignores the second constraint asks the camera for
+     * something it cannot do, which is what four seconds of exposure on a five-second interval is.
+     */
+    public static long shortestIntervalMs(Plan plan, long exposureMs, boolean longExposureNr) {
+        long fromShutter = PRESS_MS + Math.max(RELEASE_MARGIN_MS, plan.settleMs());
+        long occupancy = occupancyMs(exposureMs, longExposureNr);
+        return Math.max(fromShutter, occupancy + EXPOSURE_MARGIN_MS);
     }
 
     /**
