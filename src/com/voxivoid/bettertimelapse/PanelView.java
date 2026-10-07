@@ -522,12 +522,19 @@ public final class PanelView extends View {
                 : Hud.labelLine(engine.landed(), engine.plan().frames(), engine.skipped(),
                         engine.unverified());
 
+        // THE WHOLE LINE DRIFTS, not just the bar in it. The bar moving on its own was the first version and it
+        // is the wrong unit: a row of text held in exactly the same rows for hours burns in just as happily as a
+        // block of colour does, and a bar sliding through stationary text looks like a defect rather than
+        // deliberate. One shift, applied to every baseline and to the bar, so the line breathes up and down
+        // together (docs/DECISIONS.md A57).
+        float shift = Hud.burnInShift(now(), smallSize * 0.55f);
+
         paint.setTextSize(bigSize);
         paint.setFakeBoldText(true);
         int state = engine.state();
         paint.setColor(state == Engine.FAULT ? colWarn : (state == Engine.DONE ? colGood : colText));
         String name = Hud.stateName(state);
-        float y = h / 2f;
+        float y = h / 2f + shift;
         float x = padding;
         canvas.drawText(name, x, y, paint);
         x += paint.measureText(name) + padding * 2f;
@@ -556,9 +563,7 @@ public final class PanelView extends View {
             float track = Math.min(room, bigSize * 12f);
             if (fraction != Frames.UNKNOWN && track >= smallSize * 3f) {
                 float barHeight = Math.max(2f, smallSize * 0.34f);
-                // The whole bar drifts up and down over a minute, so the lit rows are not the same rows for the
-                // hours a long run takes (Hud.burnInShift).
-                float top = y - smallSize * 0.62f + Hud.burnInShift(now(), barHeight * 2.5f);
+                float top = y - smallSize * 0.62f;
                 float filled = track * Math.max(0f, Math.min(1f, fraction));
                 paint.setColor(colDim);
                 canvas.drawRect(x, top, x + track, top + barHeight, paint);
