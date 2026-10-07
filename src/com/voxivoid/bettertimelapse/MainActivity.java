@@ -657,10 +657,21 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         exposureMs, longExposureNr, occupancyMs(),
                         Math.max(body.shortestIntervalMs(plan),
                                 Frames.shortestIntervalMs(plan, exposureMs, longExposureNr)))
-                + "\n" + LogLines.plan(plan)
-                + "\n" + LogLines.start(cardRoot, cardCount, Device.freeBytes(
-                        cardRoot.length() == 0 ? null : cardRoot), Device.batteryPercent(this))
-                + "\n" + "boot firstframe=" + LogLines.ms(startupMs)
+                + "\n" + LogLines.plan(plan));
+        // Where the frames are going, and the count every later walk is measured against.
+        //
+        // This waits for the first walk when the run was started before that walk came back, which is what
+        // happens when the user presses the centre key within the second after the panel first draws. The
+        // session log of a 300-frame run says so: `start dir=? count=? free=20374MB bat=71%` for a run whose
+        // next line reports a card it can count perfectly well. Neither of those two numbers is a fact about
+        // the camera at that instant — there is no such fact yet — and the file is supposed to hold facts.
+        if (cardRoot.length() == 0 || cardCount == Frames.UNKNOWN) {
+            startLinePending = true;
+            startBattery = Device.batteryPercent(this);
+        } else {
+            logStartLine();
+        }
+        Session.line(this, "boot firstframe=" + LogLines.ms(startupMs)
                         + " font=" + LogLines.text(UiFont.route(), "?")
                 + "\n" + "paths log=" + LogLines.text(Session.path(), "-")
                         + " dump=" + LogLines.text(DevDump.written(), "-")
@@ -671,6 +682,26 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                     + LogLines.text(Session.problem(), "?"));
         }
     }
+
+    /**
+     * The {@code start} line, now that there is a card to put in it.
+     *
+     * <p>{@code count} here is the number the run's own accounting treats as its baseline
+     * ({@link #lastWalkCount}), which is the same number only when a walk has already come back. Taken at the
+     * instant of the run start it is the count of an in-flight walk, and the first verdict would then appear
+     * to have gained a frame nothing took.
+     */
+    private void logStartLine() {
+        int baseline = lastWalkCount == Frames.UNKNOWN ? cardCount : lastWalkCount;
+        log(LogLines.start(cardRoot, baseline, Device.freeBytes(
+                cardRoot.length() == 0 ? null : cardRoot), startBattery));
+    }
+
+    /** Whether the {@code start} line is waiting for the first card walk to come back. */
+    private boolean startLinePending;
+
+    /** What the battery said when the run started: read then, because the line is written later. */
+    private int startBattery = Device.UNKNOWN;
 
     /**
      * Say so, before the run starts, when the plan asks for more than the camera can do.
@@ -1023,6 +1054,12 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             }
             accountForFrames();
             if (lastGained > 0) engine.setLastFile(cardNewest);
+            if (startLinePending && cardRoot.length() > 0 && cardCount != Frames.UNKNOWN) {
+                // The run header was written before this walk came back, so the line waits for the card it is
+                // about, and the baseline in it is the one this walk just established. Before accountForFrames.
+                startLinePending = false;
+                logStartLine();
+            }
             logCard();
             logSummary();
             retryDeviceDump();
@@ -1215,13 +1252,23 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      * card has been asked about its last frame — the first real log said {@code END … verified=0 pending=1}
      * directly above {@code verdict … result=ok}. This is the line that waits, and it is the one worth reading
      * afterwards.
+     *
+     * <p>A paused run is counted too, and it is the reason {@code outcome=} exists: the session log of a run
+     * stopped with TRASH ended at {@code pause at=+13.176s} and nothing else, so a night's shoot carried home
+     * that way read exactly like a crash. The count waits for the same thing a finished run's does — the card
+     * answering for the last frame — because one taken at the pause would report a frame fewer than the run
+     * took. Written once per pause: resuming clears it.
      */
     private void logSummary() {
-        if (summaryLogged || engine.midRun()) return;
-        if (engine.state() != Engine.DONE && engine.state() != Engine.FAULT) return;
+        if (summaryLogged) return;
+        boolean paused = engine.state() == Engine.PAUSED;
+        if (!paused && engine.midRun()) return;
+        if (!paused && engine.state() != Engine.DONE && engine.state() != Engine.FAULT) return;
+        if (paused && engine.unverified() > 0) return;      // the card has not answered for the last frame yet
         summaryLogged = true;
-        log(LogLines.summary(engine.landed(), confirmed(), engine.skipped(), engine.unverified(),
-                runStartMs()));
+        String outcome = paused ? "paused" : (engine.state() == Engine.DONE ? "done" : "fault");
+        log(LogLines.summary(outcome, engine.landed(), confirmed(), engine.skipped(),
+                engine.unverified(), runStartMs()));
     }
 
     /**
@@ -1374,13 +1421,25 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                         Frames.Preflight preflight = Frames.preflight(engine.plan(), exposureMs,
                                 longExposureNr, body.shortestIntervalMs(engine.plan()));
                         if (!startAllowed(Hud.preflightProblem(engine.plan(), preflight), preflight)) return true;
-                        runStartMs = now();
                         loggedSkipped = 0;
                         loggedState = Engine.IDLE;
                         summaryLogged = false;
+                        // The run's clock and the timetable's origin are the same instant, and both are set
+                        // here — before anything slow. They used to be ten lines apart with a log header, a
+                        // device dump and a card walk between them, and the session log of a 5-frame run says
+                        // what that cost: every frame's `at=` and `late=` agree that the timetable began at
+                        // +2.561s while `run start` was written at +0.046s. A timetable that begins 2.5
+                        // seconds after the run it belongs to makes the first frame's `late=` a 2.5-second lie
+                        // and hands the countdown that much less time. See docs/DECISIONS.md A39.
+                        runStartMs = now();
+                        engine.step(Engine.EV_ENTER, runStartMs);
+                        // Arm the first frame's timer now, too: the work below is file I/O, and with a plan
+                        // whose delay is zero the first moment is due at once.
+                        pump();
                         logRunStart();
+                    } else {
+                        engine.step(Engine.EV_ENTER, now());
                     }
-                    engine.step(Engine.EV_ENTER, now());
                     log(LogLines.runStart(runStartMs()));
                     panel.invalidate();
                     pump();
@@ -1393,9 +1452,13 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
                     panel.trash(now());
                     if (engine.state() == Engine.PAUSED) {
                         log(LogLines.pause(runStartMs(), "trash", Device.batteryPercent(this)));
+                        // Once per pause, and again the next time: the count is the card's, so it is taken
+                        // after the walk this starts. See logSummary.
+                        summaryLogged = false;
                         walkCard();
                     } else if (engine.midRun()) {
                         log(LogLines.resume(runStartMs()));
+                        summaryLogged = false;
                     }
                 }
                 return true;

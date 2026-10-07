@@ -127,6 +127,31 @@ class LogLinesTest {
     }
 
     @Test
+    void aRunStoppedByHandStillSaysWhatItGot() {
+        // The session log of a 300-frame run stopped with TRASH ended at `pause at=+13.176s reason=trash` and
+        // stopped there: `summary` returned early while the engine was mid-run, and a run that was paused is
+        // mid-run. A night's shoot carried home that way read exactly like a crash.
+        String paused = LogLines.summary("paused", 3, 3, 0, 0, 13_176);
+        assertTrue(paused.startsWith("summary outcome=paused "), paused);
+        assertTrue(paused.contains("landed=3"), paused);
+        assertTrue(paused.contains("verified=3"), paused);
+        assertTrue(paused.contains("elapsed=13.176s"), paused);
+        // The count is taken after the card has answered for the last frame, so it can be a frame short: the
+        // word is what says the number is provisional rather than final.
+        String provisional = LogLines.summary("paused", 3, 2, 0, 1, 13_176);
+        assertTrue(provisional.contains("missed=1"), provisional);
+    }
+
+    @Test
+    void everySummarySaysWhichOutcomeItIs() {
+        // A reader with only the last line of a file has to be able to tell "it finished" from "it was
+        // stopped" from "it broke" -- those need three different answers from whoever reads the run.
+        assertTrue(LogLines.summary(5, 5, 0, 0, 22_841).contains("outcome=done"));
+        assertTrue(LogLines.summary("fault", 5, 5, 0, 0, 22_841).contains("outcome=fault"));
+        assertTrue(LogLines.summary("paused", 5, 5, 0, 0, 22_841).contains("outcome=paused"));
+    }
+
+    @Test
     void theLogNamesWhichClockIsWhich() {
         // A press and a moment are different counters, and the first real log mixed them: four skips and one
         // shot of a five-frame plan could not be told apart from five frames.

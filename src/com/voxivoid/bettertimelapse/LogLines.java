@@ -126,7 +126,25 @@ public final class LogLines {
 
     /** The run's own account of itself, written once the last frame has been answered for. */
     public static String summary(int landed, int accounted, int skipped, int unverified, long elapsedMs) {
-        return "summary landed=" + landed + " verified=" + accounted + " missed=" + unverified
+        return summary("done", landed, accounted, skipped, unverified, elapsedMs);
+    }
+
+    /**
+     * The same line when the run stopped for a reason of its own.
+     *
+     * <p>{@code outcome} is why there is no more: {@code done} (the last frame was taken), {@code paused} (the
+     * user stopped it and may start it again) or {@code fault}.
+     *
+     * <p>{@code paused} exists because a paused run used to end its block in the log with nothing but
+     * {@code pause at=+13.176s reason=trash}: a four-hour run stopped on the camera and carried home read
+     * exactly like a run that had crashed, with no count of what it got. The count is provisional and says so
+     * by the word itself — {@code resume} continues it — while a reader of the finished film wants the number
+     * and not the silence.
+     */
+    public static String summary(String outcome, int landed, int accounted, int skipped, int unverified,
+            long elapsedMs) {
+        return "summary outcome=" + text(outcome, "done")
+                + " landed=" + landed + " verified=" + accounted + " missed=" + unverified
                 + " skipped=" + skipped + " elapsed=" + rel(elapsedMs).substring(1);
     }
 

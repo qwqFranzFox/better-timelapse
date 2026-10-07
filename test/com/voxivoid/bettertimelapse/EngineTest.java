@@ -89,6 +89,28 @@ class EngineTest {
     }
 
     @Test
+    void theTimetablesOriginIsTheInstantTheRunStarted() {
+        // What the session log of a 5-frame run measured: every frame's `at=` and `late=` agree that the
+        // timetable began at +2.561s while the `run start` line — written from the same clock — said +0.046s.
+        // The shell had put a log header, a device dump and a card walk between the two, and a zero-delay plan
+        // therefore handed its first frame to the camera 2.5 seconds early.
+        //
+        // The fix is structural (the shell arms before it logs), so what this test can hold is the contract it
+        // was violating: with no delay, moment 1 IS the origin, and every later moment is one interval further
+        // on. A reader of the log recovers the origin as `at - late - (moment-1) * interval`, and that number
+        // has to be the same for every frame of the run.
+        Shell shell = new Shell(plan(5000, 5, 0), 1_000_000);
+        shell.start();
+        assertEquals(0, shell.engine.remainingMs(1_000_000), "moment 1, with no delay, is the origin itself");
+
+        for (int i = 0; i < 5; i++) {
+            long at = shell.shoot();
+            long origin = at - (long) i * 5000;
+            assertEquals(1_000_000, origin, "frame " + (i + 1) + " does not agree about where the run began");
+        }
+    }
+
+    @Test
     void aShellHeldUpPastAMomentSkipsItInsteadOfFiringTwice() {
         Shell shell = new Shell(plan(2000, 4, 0), 0);          // press window 1600, margin 400
         shell.start();

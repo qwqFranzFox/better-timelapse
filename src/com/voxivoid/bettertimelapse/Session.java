@@ -59,10 +59,18 @@ public final class Session {
     /**
      * Open the log for this launch: rotate it if it has grown, and start it with a header.
      *
+     * <p>The header goes in once per launch and never in the middle of the file. It used to be appended
+     * whenever this was called, and it is called at every run start — so a run whose plan was applied before
+     * the run header was written put {@code # better-timelapse session} between the camera block and the
+     * {@code schema=} line it belongs to, which splits one boot in two for anything reading the file. The
+     * header marks where the app was launched; the {@code schema=} line marks where a run begins, and a
+     * session that runs five times has five of those under one header, which is the truth about it.
+     *
      * @return the path, or an empty string with {@link #problem()} saying why.
      */
     public static String open(Context context, String header) {
         if (broken) return path;
+        if (path.length() > 0) return path;             // already started this launch: the header is in
         File file = locate(context);
         if (file == null) {
             broken = true;
