@@ -137,6 +137,19 @@ class LogLinesTest {
     }
 
     @Test
+    void aRowTheUserTurnedIsInTheFileAndSaysWhetherItMovedTheClock() {
+        String line = LogLines.planEdit(Plan.ROW_INTERVAL, "5s", true);
+        assertTrue(line.contains("row=interval"), line);
+        assertTrue(line.contains("value=5s"), line);
+        assertTrue(line.contains("rebased=yes"), line);
+
+        assertTrue(LogLines.planEdit(Plan.ROW_FRAMES, "300 张", false).contains("rebased=no"));
+        assertEquals("interval", LogLines.rowName(Plan.ROW_INTERVAL));
+        assertEquals("paneloff", LogLines.rowName(Plan.ROW_PANEL_OFF));
+        assertEquals("row9", LogLines.rowName(9), "a row nobody named still gets a name");
+    }
+
+    @Test
     void theFirstLineSaysWhatTheFileIs() {
         assertEquals("# better-timelapse session", LogLines.header());
         assertEquals("schema=" + LogLines.SCHEMA, LogLines.schema());

@@ -142,6 +142,33 @@ public final class LogLines {
                 + " said=" + text(said, "ok");
     }
 
+    /** A row the user turned, and whether that moved the timetable (docs/DECISIONS.md A22). */
+    public static String planEdit(int row, String value, boolean rebased) {
+        return "plan-edit row=" + rowName(row) + " value=" + text(value, "?")
+                + " rebased=" + (rebased ? "yes" : "no");
+    }
+
+    /**
+     * A row's name in the log's own language (docs/DECISIONS.md A13: the screen is Chinese, the file is not).
+     *
+     * <p>Which row was turned matters more than it looks: turning the interval mid-run rebases the timetable
+     * from that moment (A22), and a log that does not say so leaves a frame firing 2.5 s after the run started
+     * with nothing to explain it — which is exactly the first session log with a fixed formatter.
+     */
+    public static String rowName(int row) {
+        switch (row) {
+            case Plan.ROW_INTERVAL: return "interval";
+            case Plan.ROW_FRAMES: return "frames";
+            case Plan.ROW_DELAY: return "delay";
+            case Plan.ROW_SETTLE: return "settle";
+            case Plan.ROW_SILENT: return "silent";
+            case Plan.ROW_DRIVE: return "drive";
+            case Plan.ROW_AEL: return "ael";
+            case Plan.ROW_PANEL_OFF: return "paneloff";
+            default: return "row" + row;
+        }
+    }
+
     /** One reading of the whole parameter set, and what it cost: the body reports 298 of them. */
     public static String parameters(long tookMs) {
         return "parameters read=" + ms(tookMs);

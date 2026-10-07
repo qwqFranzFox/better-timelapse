@@ -608,10 +608,14 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
      */
     private void onPlanEdited(int row) {
         if (row == Plan.ROW_SILENT && panel.isDryRun()) silentChosenInRehearsal = true;
-        if (row == Plan.ROW_INTERVAL && engine.midRun()) {
+        boolean rebased = row == Plan.ROW_INTERVAL && engine.midRun();
+        if (rebased) {
             engine.schedule().rebase(now(), engine.plan());
-            pump();                                     // re-arm for the new spacing
         }
+        // Logged either way: turning the interval during a run moves the next frame's moment to now, and a log
+        // that stays silent about it cannot explain a frame that fires long after the run started.
+        log(LogLines.planEdit(row, Hud.rowValue(engine.plan(), row), rebased));
+        if (rebased) pump();                            // re-arm for the new spacing
     }
 
     // ================================================================ the preview surface
