@@ -66,6 +66,11 @@ public final class DevDump {
             if (writeTo(file, body)) {
                 written = file.getPath();
                 onCard = !isInternal(context, file);
+                // Recorded even on success. The first version returned here without setting it, so when the
+                // file landed in private storage the panel said 卡上写不进（）-- empty parentheses, the exact
+                // place the reasons should have been. The reasons a card refused are the answer to why the
+                // file is somewhere useless, so they belong on the panel whatever happened after them.
+                attempts = summarise(reasons);
                 return written;
             }
             reasons.add(shortReason(lastProblem));
@@ -187,6 +192,14 @@ public final class DevDump {
         }
         out.add(new File("/mnt/sdcard/DCIM", NAME));
         out.add(new File("/mnt/sdcard", NAME));
+        // The directory the old TimeLapse app made at the card root and logged into: on this body that is
+        // the one place an app is known to have written successfully, so it is worth a try.
+        try {
+            File ext = Environment.getExternalStorageDirectory();
+            if (ext != null) out.add(new File(new File(ext, "TIMELPS"), NAME));
+        } catch (Throwable t) {
+            // Nothing to add.
+        }
         try {
             File internal = context.getFilesDir();
             if (internal != null) out.add(new File(internal, NAME));

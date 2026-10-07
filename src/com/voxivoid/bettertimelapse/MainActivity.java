@@ -399,7 +399,7 @@ public class MainActivity extends Activity implements android.view.SurfaceHolder
             // this data leaves the camera.
             panel.setEvidence("\u8bbe\u5907\u6e05\u5355\u5199\u4e0d\u8fdb\u53bb\uff1a"      // 设备清单写不进去：
                     + DevDump.attempts() + "  " + DevDump.probe(this));
-            panel.setRoots("\u53c2\u6570\u952e " + camera.parameterKeys());                  // 参数键
+            panel.setRoots("\u66dd\u5149\u952e " + camera.exposureReport());                  // 曝光键
         } else if (!DevDump.onCard()) {
             // It landed in private storage, which on this camera cannot be retrieved at all: no adb, and
             // pmca-console has no command that pulls an app's files. So the panel carries both halves of what

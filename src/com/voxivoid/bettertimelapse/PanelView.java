@@ -97,7 +97,7 @@ public final class PanelView extends View {
 
     // ---- geometry, computed in onSizeChanged ----
     private float padding, rowHeight, nameWidth, hintWidth, statusHeight, smallSize, bigSize,
-            titleSize, valueSize;
+            titleSize, valueSize, legendHeight, notesHeight, progressHeight;
     private int rowsVisible;
 
     public PanelView(Context context, Engine engine, Typeface typeface, int background, int text,
@@ -333,19 +333,39 @@ public final class PanelView extends View {
      * and the rows take the space it leaves. Computing this once at size-change time meant the rows
      * and the progress block overlapped the moment the state changed without the window changing.
      */
+    /**
+     * Work out the bands, once, so that nothing is drawn over anything.
+     *
+     * <p>The diagnostics under the progress block used to be drawn into "whatever is left", which was
+     * nothing: with eight rows, a status line, a progress block and a legend, the space they needed was
+     * already spent, and the stack was drawn straight through the last two rows (photographed twice — 卡上
+     * 写不进 over the AEL row, 参数键 over the 关屏 row). They now have their own band, sized to the lines
+     * they actually need, and the rows get what remains.
+     */
     private void layout(float w, float h) {
+        // Measure with the text size the last frame ended on; the first frame simply reserves three lines.
+        int noteLines = noteLines(w);
+        layoutFor(w, h, noteLines * lineHeight());
+    }
+
+    private void layoutFor(float w, float h, float notes) {
         padding = w * 0.022f;
         float usable = h - padding * 2f;
         statusHeight = usable * 0.085f;
+        legendHeight = usable * 0.085f;
+        // Never more than a third of the screen: the rows are the panel, and a diagnostic that squeezes them
+        // out has stopped being a diagnostic. Past that the stack drops its least important lines instead.
+        notesHeight = Math.min(notes, usable * 0.30f);
         boolean running = engine.state() != Engine.IDLE;
-        float progressBlock = usable * (running ? 0.20f : 0.08f);
-        float legendBlock = usable * 0.085f;
-        float rowsSpace = usable - statusHeight - progressBlock - legendBlock;
+        progressHeight = usable * (running ? 0.20f : 0.08f);
+        float rowsSpace = usable - statusHeight - progressHeight - legendHeight - notesHeight;
         rowsVisible = Plan.ROW_COUNT;
         // Divide by at least 1: a text size derived from a zero or negative row height is a crash on
         // the one panel nobody measured. The rows squeezing together is the better failure.
         rowHeight = Math.max(1f, rowsSpace) / rowsVisible;
-        smallSize = rowHeight * 0.40f;
+        // Set after the rows are known, because the note measurement above depends on it next frame.
+        float small = rowHeight * 0.40f;
+        smallSize = small;
         titleSize = rowHeight * 0.46f;
         valueSize = rowHeight * 0.52f;
         bigSize = statusHeight * 0.62f;
@@ -394,9 +414,11 @@ public final class PanelView extends View {
         // 已拍 on the same baseline, and the measured line under the interval warning. The notes get a fixed
         // budget and the progress block gets what is left; past the budget the least important line is
         // dropped rather than overprinted.
-        float notes = noteBudget();
-        drawProgress(canvas, w, y, Math.max(0f, h - padding - y - notes));
-        drawLegend(canvas, w, h, h - padding - y - notes);
+        drawProgress(canvas, w, y, progressHeight);
+        // The legend sits at the bottom, the diagnostics stack upwards from it into their own band, and the
+        // band's top is the limit: past it a line would be drawn over the rows.
+        drawLegend(canvas, w, h, padding + statusHeight
+                + rowHeight * rowsVisible + progressHeight);
     }
 
     /** The label-only state: the state line and the plan, centred, on black. */
@@ -593,13 +615,25 @@ public final class PanelView extends View {
         }
     }
 
+    /** One line of small text, from its top to the next line's top. */
+    private float lineHeight() {
+        return smallSize - paint.ascent() + paint.descent();
+    }
+
     /**
-     * How much height the diagnostics under the progress block are allowed: the legend line, then up to
-     * three wrapped lines of notes.
+     * How many lines the diagnostics need at the current text size.
+     *
+     * <p>Measured, not guessed: reserving a fixed block either wastes the rows' height or fails to hold the
+     * lines, and the failure mode of the second is text on top of text.
      */
-    private float noteBudget() {
-        float lineHeight = smallSize - paint.ascent() + paint.descent();
-        return Math.min(lineHeight * 4f, (getHeight()) * 0.30f);
+    private int noteLines(float w) {
+        float width = w - padding * 2f;
+        int lines = 0;
+        if (fontError.length() > 0) lines += wrappedLines(fontError, width, 2);
+        if (evidence.length() > 0) lines += wrappedLines(evidence, width, 3);
+        if (numbers.length() > 0) lines += wrappedLines(numbers, width, 2);
+        if (roots.length() > 0) lines += wrappedLines(roots, width, 2);
+        return Math.max(1, lines);
     }
 
     /**
@@ -696,6 +730,40 @@ public final class PanelView extends View {
      * <p>{@code ascent()} and {@code descent()} rather than {@code getFontMetrics()}: the latter only
      * arrived in API 29, and this app runs on API 10.
      */
+    /**
+     * Where the line starting at {@code start} ends, given the width.
+     *
+     * <p>One place decides this, so that measuring a text and drawing it cannot disagree — which is how the
+     * notes ended up reserving a different number of lines from the number they took.
+     */
+    private int lineBreak(String text, int start, float width) {
+        int end = start;
+        while (end < text.length() && paint.measureText(text, start, end + 1) <= width) end++;
+        if (end == start) end = Math.min(text.length(), start + 1);
+        if (end < text.length()) {
+            // Prefer to break at a space so the method names stay readable.
+            int space = text.lastIndexOf(' ', end);
+            if (space > start) end = space;
+        }
+        return end;
+    }
+
+    /** Lines a text needs when wrapped, without drawing it. */
+    private int wrappedLines(String text, float width, int maxLines) {
+        if (smallSize <= 0f) return Math.min(1, maxLines);
+        float size = paint.getTextSize();
+        paint.setTextSize(smallSize);
+        int used = 0;
+        int start = 0;
+        while (start < text.length() && used < maxLines) {
+            int end = lineBreak(text, start, width);
+            start = end < text.length() ? end + 1 : text.length();
+            used++;
+        }
+        paint.setTextSize(size);
+        return Math.max(1, used);
+    }
+
     /** Whether one more line at {@code lines + 1} still sits below {@code limit}. */
     private boolean fits(float legendBaseline, float lineHeight, float lines, float limit) {
         return legendBaseline - lineHeight * lines >= limit - lineHeight * 0.5f;
@@ -715,15 +783,7 @@ public final class PanelView extends View {
         float lineHeight = paint.descent() - paint.ascent();
         int start = 0, drawn = 0;
         while (start < text.length() && drawn < maxLines) {
-            int end = start;
-            while (end < text.length() && paint.measureText(text, start, end + 1) <= width) end++;
-            if (end == start) end = Math.min(text.length(), start + 1);
-            // Prefer to break at a space so the method names stay readable.
-            int breakAt = end;
-            if (end < text.length()) {
-                int space = text.lastIndexOf(' ', end);
-                if (space > start) breakAt = space;
-            }
+            int breakAt = lineBreak(text, start, width);
             String piece = text.substring(start, breakAt);
             if (drawn == maxLines - 1 && breakAt < text.length()) piece = piece + "\u2026";   // …
             canvas.drawText(piece, x, baseline, paint);

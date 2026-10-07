@@ -182,6 +182,8 @@ EOF
     cat > "$STUBS/android/graphics/Paint.java" <<'EOF'
 package android.graphics;
 public class Paint {
+    // The panel measures at one size and draws at another; API 1 has both.
+    public float getTextSize() { return 0f; }
     public static final int ANTI_ALIAS_FLAG = 1;
     public Paint() { }
     public Paint(int flags) { }

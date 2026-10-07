@@ -676,6 +676,60 @@ public final class SonyCamera {
     }
 
     /**
+     * The keys that could hold the exposure itself, with their values, and nothing else.
+     *
+     * <p>298 parameters were reported by this body and 85 matched the first filter — far more than a panel
+     * line holds, and the file that could have carried the rest cannot be read back on this camera. So this
+     * is the narrow list: the exposure family only, with values, because a key's <em>name</em> says what the
+     * camera offers while its value says what it currently is — and a {@code -values} list would name the
+     * settings the exposure can take.
+     */
+    public String exposureReport() {
+        if (camera == null) return "(no camera)";
+        try {
+            String flat = camera.getParameters().flatten();
+            if (flat == null) return "(no parameters)";
+            String[] lines = flat.split(";");
+            StringBuilder b = new StringBuilder();
+            int shown = 0, matched = 0;
+            for (int i = 0; i < lines.length; i++) {
+                int eq = lines[i].indexOf('=');
+                String key = eq > 0 ? lines[i].substring(0, eq) : lines[i];
+                String lower = key.toLowerCase(java.util.Locale.US);
+                if (!exposureKey(lower)) continue;
+                matched++;
+                if (shown >= EXPOSURE_KEYS_SHOWN) continue;
+                if (b.length() > 0) b.append(' ');
+                b.append(key);
+                if (eq > 0) b.append('=').append(shortValue(lines[i].substring(eq + 1)));
+                shown++;
+            }
+            String head = matched == 0 ? "\u65e0" : matched + "\u9879";                      // 无 / N项
+            return head + (matched > shown ? "(+" + (matched - shown) + ")" : "") + " " + b;
+        } catch (Throwable t) {
+            return "(flatten failed: " + shortName(t) + ")";
+        }
+    }
+
+    /** A parameter value, cut to something that fits a panel line. */
+    private static String shortValue(String value) {
+        if (value == null) return "";
+        if (value.length() <= 18) return value;
+        return value.substring(0, 17) + "\u2026";
+    }
+
+    /** Whether a key could be the exposure itself rather than something about it. */
+    private static boolean exposureKey(String lower) {
+        String[] wanted = { "shutter", "exposure", "speed", "iso", "aperture", "fnumber", "f-number" };
+        for (int i = 0; i < wanted.length; i++) {
+            if (lower.indexOf(wanted[i]) >= 0) return true;
+        }
+        return false;
+    }
+
+    private static final int EXPOSURE_KEYS_SHOWN = 10;
+
+    /**
      * Whether a parameter key could carry something this app needs to know.
      *
      * <p>The list is the whole answer to "what will this body tell us": {@code exposure} was missing from it
