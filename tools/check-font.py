@@ -8,7 +8,6 @@ font is a tofu box on a screen the user has no way to debug.
     tools/check-font.py
 """
 import os, sys
-from fontTools.ttLib import TTFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from importlib.machinery import SourceFileLoader
@@ -18,6 +17,15 @@ ROOT = os.path.dirname(HERE)
 FONT = os.path.join(ROOT, "assets", "fonts", "BetterTimelapseCjkSC-Regular.ttf")
 
 def main():
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        # A missing optional tool skips with a reason instead of failing the build (docs/DECISIONS.md A16).
+        # This check is a hard gate when it runs -- a character absent from the bundled subset is a tofu box
+        # on a camera screen -- so the skip is loud, and the container image ships python3-fonttools so that
+        # the build this project actually releases from always runs it.
+        print("      SKIPPED: no fontTools (apt install python3-fonttools, or pip install fonttools)")
+        return 0
     needed = sf.collect_characters()
     if not os.path.exists(FONT):
         print(f"  FAIL font absent: {FONT}")

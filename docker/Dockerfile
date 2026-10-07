@@ -59,6 +59,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # python3 is here for tools/check-apk.py, the step-7 check that the APK really is installable on a
 # PMCA body (v1 signature, armeabi, ARM code). It is the standard library only, no packages.
 #
+# python3-fonttools is here for tools/check-font.py, which the test step runs: the APK carries its own
+# CJK subset because the camera's firmware font has none, and a character missing from that subset is
+# a tofu box on a screen the user cannot debug. The check needs fontTools to read the font's cmap.
+# It degrades to a skip without it, so a host without the package can still run the tests -- but the
+# container is where a release is built, and there the check must actually run.
+#
 # The NDK r16b toolchain ships some 32-bit host binaries. On a normal amd64 host the 64-bit ones work
 # as they are, so no i386 architecture is added here. If an NDK tool fails with "No such file or
 # directory", add:  dpkg --add-architecture i386
@@ -66,7 +72,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       openjdk-17-jdk-headless \
-      ca-certificates curl unzip zip git make file python3 \
+      ca-certificates curl unzip zip git make file python3 python3-fonttools \
  && rm -rf /var/lib/apt/lists/*
 
 # ---- layer 3: download the command line tools (154 MB) ----

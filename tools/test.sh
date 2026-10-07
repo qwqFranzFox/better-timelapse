@@ -68,8 +68,13 @@ else
 fi
 
 echo "[1b/3] font coverage"
-# A character missing from the bundled font is a tofu box on a screen the user cannot debug, so this
-# is a gate and not a report. It runs before the tests because it needs nothing but python3.
+# A character missing from the bundled font is a tofu box on a screen the user cannot debug, so this is
+# a gate and not a report.
+#
+# It needs python3 AND fontTools. The container image ships both (python3-fonttools), so a release build
+# always runs it; without fontTools the check itself says so and passes rather than failing the build
+# over an optional tool (docs/DECISIONS.md A16). This step is why that rule matters: importing fontTools
+# at module level broke the container build outright the first time it ran there.
 if command -v python3 >/dev/null 2>&1 && [ -f tools/check-font.py ]; then
   python3 tools/check-font.py
 else
